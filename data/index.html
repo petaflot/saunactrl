@@ -1,76 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <title>Sauna Control</title>
-  <meta charset="UTF-8" />
-  <script src="/socket.io.min.js"></script>
-  <style>
-    body { font-family: sans-serif; }
-    table { margin-top: 1em; }
-    td { padding: 0.5em; }
-    #graph { width: 100%; height: 300px; border: 1px solid #ccc; }
-  </style>
+  <script>
+    let ws;
+
+    window.onload = () => {
+      ws = new WebSocket("ws://" + window.location.host + "/ws");
+
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+      };
+
+      ws.onmessage = (event) => {
+        console.log("WebSocket message:", event.data);
+        try {
+          const data = JSON.parse(event.data);
+          document.getElementById("currentTemp").textContent = data.temp.toFixed(1);
+          document.getElementById("currentTarget").value = data.target.toFixed(1);
+          document.getElementById("currentStatus").textContent = data.enabled ? "On" : "Off";
+        } catch (e) {
+          console.error("Failed to parse message:", e);
+        }
+      };
+
+      document.getElementById("toggleBtn").onclick = () => {
+        const current = document.getElementById("currentStatus").textContent;
+        ws.send(current === "Off" ? "enable" : "disable");
+      };
+
+      document.getElementById("currentTarget").onchange = () => {
+        const val = document.getElementById("currentTarget").value;
+        ws.send("target:" + val);
+      };
+    };
+  </script>
 </head>
 <body>
   <h1>Sauna</h1>
-
   <h2>Controls</h2>
   <table>
     <tr>
       <td>Power:</td>
       <td><button id="toggleBtn">Toggle</button></td>
-      <td id="powerStatus">---</td>
+      <td>Status: <span id="currentStatus">Unknown</span></td>
     </tr>
     <tr>
-      <td>Sauna temperature:</td>
-      <td><input type="number" id="targetTemp" /> °C</td>
-      <td id="currentTemp">---</td>
+      <td>Target temperature:</td>
+      <td><input type="number" id="currentTarget" step="0.5" min="0" max="120"> °C</td>
+      <td>Current: <span id="currentTemp">--</span> °C</td>
     </tr>
   </table>
-
-  <h2>Status</h2>
-  <canvas id="graph"></canvas>
-
-  <script>
-    const socket = io("/ws");
-    const graph = document.getElementById("graph").getContext("2d");
-    const maxPoints = 120;
-    let dataPoints = [];
-
-    const plot = () => {
-      graph.clearRect(0, 0, graph.canvas.width, graph.canvas.height);
-      if (dataPoints.length < 2) return;
-      const w = graph.canvas.width;
-      const h = graph.canvas.height;
-      const min = Math.min(...dataPoints);
-      const max = Math.max(...dataPoints);
-      graph.beginPath();
-      dataPoints.forEach((temp, i) => {
-        const x = (i / (maxPoints - 1)) * w;
-        const y = h - ((temp - min) / (max - min)) * h;
-        i === 0 ? graph.moveTo(x, y) : graph.lineTo(x, y);
-      });
-      graph.stroke();
-    };
-
-    document.getElementById("toggleBtn").onclick = () => {
-      socket.send(powerStatus.textContent === "ON" ? "disable" : "enable");
-    };
-
-    document.getElementById("targetTemp").onchange = (e) => {
-      socket.send("target:" + e.target.value);
-    };
-
-    socket.on("message", (msg) => {
-      const data = JSON.parse(msg);
-      document.getElementById("powerStatus").textContent = data.enabled ? "ON" : "OFF";
-      document.getElementById("currentTemp").textContent = data.temp.toFixed(2);
-      document.getElementById("targetTemp").value = data.target.toFixed(1);
-      dataPoints.push(data.temp);
-      if (dataPoints.length > maxPoints) dataPoints.shift();
-      plot();
-    });
-  </script>
 </body>
 </html>
-
