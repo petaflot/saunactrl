@@ -1,4 +1,4 @@
-Some electronics to control a sauna, with PID, web server and a few other things
+Some electronics to control a sauna, with PID, web server.
 
 # Features
 
@@ -6,6 +6,10 @@ Some electronics to control a sauna, with PID, web server and a few other things
 
 
 ## TODO
+
+* RGB light
+* ice bath
+* door switch(es)
 * Timing bell and deadman's switch
 
 
