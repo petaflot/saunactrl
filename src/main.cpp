@@ -8,17 +8,16 @@
 #include <LittleFS.h>
 
 // this will enable serial debugging output
-#define SINGLEPHASE_TESTMODE
+//#define SINGLEPHASE_TESTMODE
 
 const char* ssid = "engrenage";
 const char* password = "3n9r3na93";
-//uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
-uint8_t bssid[] = { 0x00, 0x14, 0xBF, 0xA4, 0xE9, 0x6A };	// WRT2
-// Static IP configuration
-//IPAddress local_IP(10, 11, 21, 33);
-//IPAddress gateway(10, 11, 21, 13);
-IPAddress local_IP(10, 11, 22, 33);
-IPAddress gateway(10, 11, 22, 13);
+uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
+IPAddress local_IP(10, 11, 21, 33);
+IPAddress gateway(10, 11, 21, 13);
+//uint8_t bssid[] = { 0x00, 0x14, 0xBF, 0xA4, 0xE9, 0x6A };	// WRT2
+//IPAddress local_IP(10, 11, 22, 33);
+//IPAddress gateway(10, 11, 22, 13);
 
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(10, 11, 12, 13);
@@ -46,18 +45,27 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 // PID setup
-double Setpoint = 105.0, Input = 0, Output = 0;
+double Setpoint = 75.0, Input = 0, Output = 0;
 PID myPID(&Input, &Output, &Setpoint, 2, 5, 1, DIRECT);
 
 // Relay control
 bool enabled = false;
 unsigned long lastSend = 0;
+enum RelayMode { RELAY_OFF, RELAY_PID, RELAY_ON };
+RelayMode relayModes[3] = { RELAY_OFF, RELAY_OFF, RELAY_OFF };
+enum RelayStatus { RELAY_IS_OFF, RELAY_IS_ON };
+RelayStatus relayStates[3] = { RELAY_IS_OFF, RELAY_IS_OFF };
 
 void notifyClients() {
-  char msg[64];
-  snprintf(msg, sizeof(msg), "{\"temp\":%.2f,\"target\":%.2f,\"enabled\":%s}", Input, Setpoint, enabled ? "true" : "false");
+  char msg[128];
+  snprintf(msg, sizeof(msg),
+           "{\"temp\":%.2f,\"target\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]};",
+           Input, Setpoint, 
+	   enabled ? "true" : "false",
+           relayModes[0], relayModes[1], relayModes[2],
+           relayStates[0], relayStates[1], relayStates[2]);
   ws.textAll(msg);
-  Serial.println(String("Sent to client: ") + msg);
+  Serial.printf("Sent to client: %s\n", msg);
 }
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
@@ -76,6 +84,15 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
       Serial.println("disabling");
     } else if (msg.startsWith("target:")) {
       Setpoint = msg.substring(7).toFloat();
+    } else if (msg.startsWith("relay:")) {
+      int r = msg.substring(6,7).toInt() - 1; // relay index 0..2
+      String mode = msg.substring(8);
+      if (r >= 0 && r < 3) {
+        if (mode == "on") relayModes[r] = RELAY_ON;
+        else if (mode == "off") relayModes[r] = RELAY_OFF;
+        else if (mode == "pid") relayModes[r] = RELAY_PID;
+      }
+
     }
     notifyClients();
   }
@@ -192,12 +209,6 @@ void loop() {
   sensors.requestTemperatures();
   Input = sensors.getTempC(sensor1);
 
-  if (enabled) {
-  	digitalWrite(LED, HIGH);
-  } else {
-  	digitalWrite(LED, LOW);
-  }
-
   if (Input == DEVICE_DISCONNECTED_C) {
 #ifdef SINGLEPHASE_TESTMODE
     Serial.println("Sensor disconnected!");
@@ -212,11 +223,27 @@ void loop() {
     Output = 0;
   }
 
-  digitalWrite(RELAY1, enabled && Output >= 1 ? LOW : HIGH);
+  if (enabled) {
+	digitalWrite(RELAY1, (relayModes[0] == RELAY_ON) ? LOW :
+                       (relayModes[0] == RELAY_PID && Output >= 1 ? LOW : HIGH));
 #ifndef SINGLEPHASE_TESTMODE
-  digitalWrite(RELAY2, enabled && Output >= 2 ? LOW : HIGH);
-  digitalWrite(RELAY3, enabled && Output >= 3 ? LOW : HIGH);
+	digitalWrite(RELAY2, (relayModes[1] == RELAY_ON) ? HIGH :
+                       (relayModes[1] == RELAY_PID && Output >= 2 ? LOW : HIGH));
+	digitalWrite(RELAY3, (relayModes[2] == RELAY_ON) ? HIGH :
+                       (relayModes[2] == RELAY_PID && Output >= 3 ? LOW : HIGH));
 #endif
+  	digitalWrite(LED, HIGH);
+    } else {
+  	digitalWrite(LED, LOW);
+  	digitalWrite(RELAY1, HIGH);
+  	digitalWrite(RELAY2, HIGH);
+  	digitalWrite(RELAY3, HIGH);
+    }
+
+  // TODO abstraction layer... TODO PS-VM-RD compat
+  relayStates[0] = digitalRead(RELAY1);
+  relayStates[1] = digitalRead(RELAY2);
+  relayStates[2] = digitalRead(RELAY3);
 
   if (millis() - lastSend > 10000) {
     notifyClients();

@@ -31,14 +31,14 @@
       border-radius: 50%;
     }
 
-    /* State colors */
+    /* Mode colors */
     .switch.on .slider { background-color: #4CAF50; }
     .switch.off .slider { background-color: #ccc; }
     .switch.on-pending .slider { background-color: #ABFFBA; }
     .switch.off-pending .slider { background-color: #FFBCAB; }
     .switch.on-expired .slider { background-color: #ABFFBA; }
     .switch.off-expired .slider { background-color: #FFBCAB; }
-    .switch.unknown .slider { background-color: #ccc; }
+    .switch.modeUnknown .slider { background-color: #ccc; }
 
     /* Dot positions */
     .switch.on .slider:before,
@@ -60,33 +60,73 @@
       height: 8px; width: 8px; top: 13px; left: 13px;
     }
     .switch.on-expired .slider:before { transform: translateX(26px); }
-    .switch.unknown .slider:before { visibility: hidden; }
+    .switch.modeUnknown .slider:before { visibility: hidden; }
 
     /* Text colors */
     .status { font-weight: bold; margin-left: 10px; }
-    .unknown { color: gray; }
+    .modeUnknown { color: gray; }
     .on { color: green; }
     .off { color: red; }
     .pending { color: orange; }
     .expired { color: darkred; }
+ 
+
+    .v-switch {
+      position: relative;
+      width: 40px;
+      height: 120px;
+      background: #ccc;
+      border-radius: 20px;
+      margin: 20px;
+    }
+    .knob {
+      position: absolute;
+      left: 5px;
+      width: 30px;
+      height: 30px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+
+    .v-switch.on      { background: #4CAF50; }
+    .v-switch.pid     { background: #2196F3; }
+    .v-switch.off     { background: #f44336; }
+    .v-switch.modeUnknown { background: #999; }
+
+    .v-switch.on .knob      { top: 5px; }
+    .v-switch.pid .knob     { top: 45px; }
+    .v-switch.off .knob     { top: 85px; }
+    .v-switch.modeUnknown .knob { top: 45px; visibility: hidden; }
   </style>
   <script>
     let ws;
     let lastUpdate = 0;
     let watchdogTimer;
-    let state = "unknown";
+    let mode = "modeUnknown";
 
-    function setState(newState) {
-      state = newState;
+    function cycleRelay(relay) {
+  const el = document.getElementById("relay" + relay);
+  const modes = ["on", "pid", "off"];
+  let idx = modes.indexOf(el.dataset.mode || "pid");
+  idx = (idx + 1) % modes.length;
+  let newMode = modes[idx];
+  el.dataset.mode = newMode;
+  ws.send("relay:" + relay + ":" + newMode);
+}
+
+
+    function setMode(newMode) {
+      mode = newMode;
       const statusEl = document.getElementById("status");
       const toggleWrap = document.getElementById("powerWrap");
 
-      toggleWrap.className = "switch " + state;
+      toggleWrap.className = "switch " + mode;
 
-      switch (state) {
-        case "unknown":
+      switch (mode) {
+        case "modeUnknown":
           statusEl.textContent = "Unknown";
-          statusEl.className = "status unknown";
+          statusEl.className = "status modeUnknown";
           break;
         case "on":
           statusEl.textContent = "On";
@@ -135,24 +175,47 @@
         const watchdogInfo = document.getElementById("watchdog");
 
         if (s < 60) {
-          watchdogInfo.textContent = `Last update ${formatElapsed(elapsed)} ago`;
+          watchdogInfo.textContent = `(updated ${formatElapsed(elapsed)} ago)`;
         } else if (s < 3600) {
           if (s % 60 === 0) {
-            watchdogInfo.textContent = `Last update ${formatElapsed(elapsed)} ago`;
+            watchdogInfo.textContent = `(updated ${formatElapsed(elapsed)} ago)`;
           }
         } else {
           if (s % 3600 === 0) {
-            watchdogInfo.textContent = `Last update ${formatElapsed(elapsed)} ago`;
+            watchdogInfo.textContent = `(updated ${formatElapsed(elapsed)} ago)`;
             clearInterval(watchdogTimer);
-            setState("unknown"); // watchdog fully stopped
+            setMode("modeUnknown"); // watchdog fully stopped
           }
         }
 
-        if (s >= 10 && s < 3600) {
-          if (state === "on" || state === "on-pending") setState("on-expired");
-          else if (state === "off" || state === "off-pending") setState("off-expired");
+        if (s >= 12 && s < 3600) {
+          if (mode === "on" || mode === "on-pending") setMode("on-expired");
+          else if (mode === "off" || mode === "off-pending") setMode("off-expired");
         }
       }, 1000);
+    }
+
+    function setRelayUI(relay, mode) {
+      const el = document.getElementById("relay" + relay);
+      const status = document.getElementById("relay" + relay + "Status");
+      el.className = "v-switch " + mode;
+      el.dataset.mode = mode;
+      status.textContent =
+        mode === "on" ? "Always On" :
+        mode === "pid" ? "PID Controlled" :
+        mode === "off" ? "Always Off" :
+        "Unknown";
+    }
+
+    function cycleRelay(relay) {
+      const el = document.getElementById("relay" + relay);
+      const modes = ["on", "pid", "off"];
+      let idx = modes.indexOf(el.dataset.mode);
+      if (idx < 0) idx = 0;
+      idx = (idx + 1) % modes.length;
+      const newMode = modes[idx];
+      setRelayUI(relay, newMode);
+      ws.send("relay:" + relay + ":" + newMode);
     }
 
     window.onload = () => {
@@ -168,9 +231,16 @@
           const data = JSON.parse(event.data);
           document.getElementById("currentTemp").textContent = data.temp.toFixed(1);
           document.getElementById("targetTemp").value = data.target.toFixed(1);
+	  if (data.relayModes) {
+            const map = ["off", "pid", "on"]; // 0=off, 1=pid, 2=on
+            for (let i = 0; i < 3; i++) {
+              const st = map[data.relayModes[i]] || "modeUnknown";
+              setRelayUI(i+1, st);
+            }
+          }
           lastUpdate = Date.now();
-          if (data.enabled) setState("on");
-          else setState("off");
+          if (data.enabled) setMode("on");
+          else setMode("off");
           refreshWatchdog();
         } catch (e) {
           console.error("Parse error:", e);
@@ -180,10 +250,10 @@
       document.getElementById("powerToggle").onchange = (ev) => {
         if (ev.target.checked) {
           ws.send("enable");
-          setState("on-pending");
+          setMode("on-pending");
         } else {
           ws.send("disable");
-          setState("off-pending");
+          setMode("off-pending");
         }
       };
 
@@ -192,28 +262,25 @@
         ws.send("target:" + val);
       };
 
-      setState("unknown");
+      setMode("modeUnknown");
       refreshWatchdog();
     };
+
   </script>
 </head>
 <body>
-  <p><a id="selflink" href="#">Reload Sauna Control</a></p>
-  <h1>Sauna</h1>
-  <h2>Controls</h2>
+  <p><a id="selflink" href="#">Reload page</a></p>
+  <h1>Sauna Control</h1>
   <table>
     <tr>
       <td>Power:</td>
       <td>
-        <label id="powerWrap" class="switch unknown">
+        <label id="powerWrap" class="switch modeUnknown">
           <input type="checkbox" id="powerToggle">
           <span class="slider"></span>
         </label>
       </td>
-      <td>Status: <span id="status" class="status unknown">Unknown</span></td>
-    </tr>
-    <tr>
-      <td colspan="3"><span id="watchdog" style="font-style:italic; color:gray;"></span></td>
+      <td>Status: <span id="status" class="status modeUnknown">Unknown</span> <span id="watchdog" style="font-style:italic; color:gray;"></span></td>
     </tr>
     <tr>
       <td>Target temperature:</td>
@@ -221,16 +288,34 @@
       <td>Current: <span id="currentTemp">--</span> °C</td>
     </tr>
     <tr>
-      <td>Phase function:</td>
-  	<div class="v-switch unknown" id="relay1" onclick="cycleRelay(1)">
-  	<div class="knob"></div>
-  	<div class="v-switch unknown" id="relay2" onclick="cycleRelay(2)">
-  	<div class="knob"></div>
-  	<div class="v-switch unknown" id="relay3" onclick="cycleRelay(3)">
-  	<div class="knob"></div>
+      <td>Phase switches:</td>
+      <td>
+      	<table>
+	  <tr>
+	    <td>
+  	      <div class="v-switch modeUnknown" id="relay1" onclick="cycleRelay(1)">
+	      	<div class="knob"></div>
+	      </div>
+	    </td>
+	    <td>
+  	      <div class="v-switch modeUnknown" id="relay2" onclick="cycleRelay(2)">
+	      	<div class="knob"></div>
+	      </div>
+	    </td>
+	    <td>
+  	      <div class="v-switch modeUnknown" id="relay3" onclick="cycleRelay(3)">
+	      	<div class="knob"></div>
+	      </div>
+	    </td>
+	  </tr>
+	</table>
+      </td>
+      <td>
+	      <p>Relay 1: <span id="relay1Status">Unknown</span></p>
+	      <p>Relay 2: <span id="relay2Status">Unknown</span></p>
+	      <p>Relay 3: <span id="relay3Status">Unknown</span></p>
+      </td>
     </tr>
-</div>
-<p>Relay 1: <span id="relay1Status">Unknown</span></p>
   </table>
 </body>
 </html>
