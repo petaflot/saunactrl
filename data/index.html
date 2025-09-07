@@ -3,54 +3,235 @@
 <head>
   <meta charset="utf-8">
   <title>Sauna Control</title>
+  <style>
+    body { font-family: sans-serif; }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+    .switch input {
+      display: none;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #ccc;
+      transition: 0.4s;
+      border-radius: 34px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      left: 4px; bottom: 4px;
+      background-color: white;
+      transition: 0.4s;
+      border-radius: 50%;
+    }
+
+    /* State colors */
+    .switch.on .slider { background-color: #4CAF50; }
+    .switch.off .slider { background-color: #ccc; }
+    .switch.on-pending .slider { background-color: #ABFFBA; }
+    .switch.off-pending .slider { background-color: #FFBCAB; }
+    .switch.on-expired .slider { background-color: #ABFFBA; }
+    .switch.off-expired .slider { background-color: #FFBCAB; }
+    .switch.unknown .slider { background-color: #ccc; }
+
+    /* Dot positions */
+    .switch.on .slider:before,
+    .switch.on-pending .slider:before,
+    .switch.on-expired .slider:before { transform: translateX(26px); }
+
+    /* Dot sizes */
+    .switch.on .slider:before,
+    .switch.off .slider:before {
+      height: 26px; width: 26px; visibility: visible;
+    }
+    .switch.on-pending .slider:before,
+    .switch.off-pending .slider:before {
+      height: 13px; width: 13px; top: 10px; left: 10px;
+    }
+    .switch.on-pending .slider:before { transform: translateX(26px); }
+    .switch.on-expired .slider:before,
+    .switch.off-expired .slider:before {
+      height: 8px; width: 8px; top: 13px; left: 13px;
+    }
+    .switch.on-expired .slider:before { transform: translateX(26px); }
+    .switch.unknown .slider:before { visibility: hidden; }
+
+    /* Text colors */
+    .status { font-weight: bold; margin-left: 10px; }
+    .unknown { color: gray; }
+    .on { color: green; }
+    .off { color: red; }
+    .pending { color: orange; }
+    .expired { color: darkred; }
+  </style>
   <script>
     let ws;
+    let lastUpdate = 0;
+    let watchdogTimer;
+    let state = "unknown";
+
+    function setState(newState) {
+      state = newState;
+      const statusEl = document.getElementById("status");
+      const toggleWrap = document.getElementById("powerWrap");
+
+      toggleWrap.className = "switch " + state;
+
+      switch (state) {
+        case "unknown":
+          statusEl.textContent = "Unknown";
+          statusEl.className = "status unknown";
+          break;
+        case "on":
+          statusEl.textContent = "On";
+          statusEl.className = "status on";
+          break;
+        case "off":
+          statusEl.textContent = "Off";
+          statusEl.className = "status off";
+          break;
+        case "on-pending":
+          statusEl.textContent = "On (pending)";
+          statusEl.className = "status pending";
+          break;
+        case "off-pending":
+          statusEl.textContent = "Off (pending)";
+          statusEl.className = "status pending";
+          break;
+        case "on-expired":
+          statusEl.textContent = "On (expired)";
+          statusEl.className = "status expired";
+          break;
+        case "off-expired":
+          statusEl.textContent = "Off (expired)";
+          statusEl.className = "status expired";
+          break;
+      }
+    }
+
+    function formatElapsed(ms) {
+      const s = Math.floor(ms / 1000);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      return `${h}h ${m}m ${sec}s`;
+    }
+
+    function refreshWatchdog() {
+      clearInterval(watchdogTimer);
+
+      watchdogTimer = setInterval(() => {
+        if (!lastUpdate) return;
+
+        const now = Date.now();
+        const elapsed = now - lastUpdate;
+        const s = Math.floor(elapsed / 1000);
+        const watchdogInfo = document.getElementById("watchdog");
+
+        if (s < 60) {
+          watchdogInfo.textContent = `Last update ${formatElapsed(elapsed)} ago`;
+        } else if (s < 3600) {
+          if (s % 60 === 0) {
+            watchdogInfo.textContent = `Last update ${formatElapsed(elapsed)} ago`;
+          }
+        } else {
+          if (s % 3600 === 0) {
+            watchdogInfo.textContent = `Last update ${formatElapsed(elapsed)} ago`;
+            clearInterval(watchdogTimer);
+            setState("unknown"); // watchdog fully stopped
+          }
+        }
+
+        if (s >= 10 && s < 3600) {
+          if (state === "on" || state === "on-pending") setState("on-expired");
+          else if (state === "off" || state === "off-pending") setState("off-expired");
+        }
+      }, 1000);
+    }
 
     window.onload = () => {
+      document.getElementById("selflink").href = window.location.href;
+
       ws = new WebSocket("ws://" + window.location.host + "/ws");
 
-      ws.onopen = () => {
-        console.log("WebSocket connected");
-      };
+      ws.onopen = () => console.log("WebSocket connected");
 
       ws.onmessage = (event) => {
-        console.log("WebSocket message:", event.data);
+        console.log("Message:", event.data);
         try {
           const data = JSON.parse(event.data);
           document.getElementById("currentTemp").textContent = data.temp.toFixed(1);
-          document.getElementById("currentTarget").value = data.target.toFixed(1);
-          document.getElementById("currentStatus").textContent = data.enabled ? "On" : "Off";
+          document.getElementById("targetTemp").value = data.target.toFixed(1);
+          lastUpdate = Date.now();
+          if (data.enabled) setState("on");
+          else setState("off");
+          refreshWatchdog();
         } catch (e) {
-          console.error("Failed to parse message:", e);
+          console.error("Parse error:", e);
         }
       };
 
-      document.getElementById("toggleBtn").onclick = () => {
-        const current = document.getElementById("currentStatus").textContent;
-        ws.send(current === "Off" ? "enable" : "disable");
+      document.getElementById("powerToggle").onchange = (ev) => {
+        if (ev.target.checked) {
+          ws.send("enable");
+          setState("on-pending");
+        } else {
+          ws.send("disable");
+          setState("off-pending");
+        }
       };
 
-      document.getElementById("currentTarget").onchange = () => {
-        const val = document.getElementById("currentTarget").value;
+      document.getElementById("targetTemp").onchange = () => {
+        const val = document.getElementById("targetTemp").value;
         ws.send("target:" + val);
       };
+
+      setState("unknown");
+      refreshWatchdog();
     };
   </script>
 </head>
 <body>
+  <p><a id="selflink" href="#">Reload Sauna Control</a></p>
   <h1>Sauna</h1>
   <h2>Controls</h2>
   <table>
     <tr>
       <td>Power:</td>
-      <td><button id="toggleBtn">Toggle</button></td>
-      <td>Status: <span id="currentStatus">Unknown</span></td>
+      <td>
+        <label id="powerWrap" class="switch unknown">
+          <input type="checkbox" id="powerToggle">
+          <span class="slider"></span>
+        </label>
+      </td>
+      <td>Status: <span id="status" class="status unknown">Unknown</span></td>
+    </tr>
+    <tr>
+      <td colspan="3"><span id="watchdog" style="font-style:italic; color:gray;"></span></td>
     </tr>
     <tr>
       <td>Target temperature:</td>
-      <td><input type="number" id="currentTarget" step="0.5" min="0" max="120"> °C</td>
+      <td><input type="number" id="targetTemp" step="0.5" min="0" max="120"> °C</td>
       <td>Current: <span id="currentTemp">--</span> °C</td>
     </tr>
+    <tr>
+      <td>Phase function:</td>
+  	<div class="v-switch unknown" id="relay1" onclick="cycleRelay(1)">
+  	<div class="knob"></div>
+  	<div class="v-switch unknown" id="relay2" onclick="cycleRelay(2)">
+  	<div class="knob"></div>
+  	<div class="v-switch unknown" id="relay3" onclick="cycleRelay(3)">
+  	<div class="knob"></div>
+    </tr>
+</div>
+<p>Relay 1: <span id="relay1Status">Unknown</span></p>
   </table>
 </body>
 </html>
+

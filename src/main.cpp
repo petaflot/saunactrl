@@ -8,15 +8,19 @@
 #include <LittleFS.h>
 
 // this will enable serial debugging output
-//#define SINGLEPHASE_TESTMODE
+#define SINGLEPHASE_TESTMODE
 
 const char* ssid = "engrenage";
 const char* password = "3n9r3na93";
-uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };
+//uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
+uint8_t bssid[] = { 0x00, 0x14, 0xBF, 0xA4, 0xE9, 0x6A };	// WRT2
 // Static IP configuration
-IPAddress local_IP(10, 11, 21, 33);
+//IPAddress local_IP(10, 11, 21, 33);
+//IPAddress gateway(10, 11, 21, 13);
+IPAddress local_IP(10, 11, 22, 33);
+IPAddress gateway(10, 11, 22, 13);
+
 IPAddress subnet(255, 255, 255, 0);
-IPAddress gateway(10, 11, 21, 13);
 IPAddress dns(10, 11, 12, 13);
 
 //#define WS2812_Din	D0
