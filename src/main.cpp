@@ -53,13 +53,13 @@ bool enabled = false;
 unsigned long lastSend = 0;
 enum RelayMode { RELAY_OFF, RELAY_PID, RELAY_ON };
 RelayMode relayModes[3] = { RELAY_OFF, RELAY_OFF, RELAY_OFF };
-enum RelayStatus { RELAY_IS_OFF, RELAY_IS_ON };
-RelayStatus relayStates[3] = { RELAY_IS_OFF, RELAY_IS_OFF };
+enum RelayStates { RELAY_IS_OFF, RELAY_IS_ON, SOMETHING_IS_BROKEN };
+RelayStates relayStates[3] = { RELAY_IS_OFF, RELAY_IS_OFF };
 
 void notifyClients() {
   char msg[128];
   snprintf(msg, sizeof(msg),
-           "{\"temp\":%.2f,\"target\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]};",
+           "{\"temp\":%.2f,\"target\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
            Input, Setpoint, 
 	   enabled ? "true" : "false",
            relayModes[0], relayModes[1], relayModes[2],
@@ -233,17 +233,24 @@ void loop() {
                        (relayModes[2] == RELAY_PID && Output >= 3 ? LOW : HIGH));
 #endif
   	digitalWrite(LED, HIGH);
-    } else {
+  } else {
   	digitalWrite(LED, LOW);
   	digitalWrite(RELAY1, HIGH);
+#ifndef SINGLEPHASE_TESTMODE
   	digitalWrite(RELAY2, HIGH);
   	digitalWrite(RELAY3, HIGH);
-    }
+#endif
+  }
 
-  // TODO abstraction layer... TODO PS-VM-RD compat
-  relayStates[0] = digitalRead(RELAY1);
-  relayStates[1] = digitalRead(RELAY2);
-  relayStates[2] = digitalRead(RELAY3);
+  // TODO abstraction layer and PS-VM-RD compat (remove relayStates[x] above!)
+  relayStates[0] = (digitalRead(RELAY1) == HIGH) ? RELAY_IS_OFF : RELAY_IS_ON;
+#ifndef SINGLEPHASE_TESTMODE
+  relayStates[1] = (digitalRead(RELAY2) == HIGH) ? RELAY_IS_OFF : RELAY_IS_ON;
+  relayStates[2] = (digitalRead(RELAY3) == HIGH) ? RELAY_IS_OFF : RELAY_IS_ON;
+#else
+	relayStates[1] = SOMETHING_IS_BROKEN;
+	relayStates[2] = SOMETHING_IS_BROKEN;
+#endif
 
   if (millis() - lastSend > 10000) {
     notifyClients();

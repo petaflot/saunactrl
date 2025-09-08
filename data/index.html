@@ -69,8 +69,8 @@
     .off { color: red; }
     .pending { color: orange; }
     .expired { color: darkred; }
- 
 
+    /* Vertical relay switches */
     .v-switch {
       position: relative;
       width: 40px;
@@ -78,6 +78,7 @@
       background: #ccc;
       border-radius: 20px;
       margin: 20px;
+      cursor: pointer;
     }
     .knob {
       position: absolute;
@@ -89,11 +90,43 @@
       transition: 0.3s;
     }
 
+    /* Indicator inside knob */
+    .knob::after,
+    .knob::before {
+      content: "";
+      position: absolute;
+      display: none;
+      background: black;
+    }
+    /* ON = vertical pill */
+    .relayOn .knob::after {
+      display: block;
+      top: 5px;
+      left: 13px;
+      width: 4px;
+      height: 20px;
+      border-radius: 2px;
+    }
+    /* ERROR = black X */
+    .relayError .knob::before,
+    .relayError .knob::after {
+      display: block;
+      top: 14px;
+      left: 6px;
+      width: 18px;
+      height: 2px;
+      transform-origin: center;
+    }
+    .relayError .knob::before { transform: rotate(45deg); }
+    .relayError .knob::after  { transform: rotate(-45deg); }
+
+    /* Switch states */
     .v-switch.on      { background: #4CAF50; }
     .v-switch.pid     { background: #2196F3; }
     .v-switch.off     { background: #f44336; }
     .v-switch.modeUnknown { background: #999; }
 
+    /* Knob positions */
     .v-switch.on .knob      { top: 5px; }
     .v-switch.pid .knob     { top: 45px; }
     .v-switch.off .knob     { top: 85px; }
@@ -104,17 +137,6 @@
     let lastUpdate = 0;
     let watchdogTimer;
     let mode = "modeUnknown";
-
-    function cycleRelay(relay) {
-  const el = document.getElementById("relay" + relay);
-  const modes = ["on", "pid", "off"];
-  let idx = modes.indexOf(el.dataset.mode || "pid");
-  idx = (idx + 1) % modes.length;
-  let newMode = modes[idx];
-  el.dataset.mode = newMode;
-  ws.send("relay:" + relay + ":" + newMode);
-}
-
 
     function setMode(newMode) {
       mode = newMode;
@@ -160,7 +182,7 @@
       const h = Math.floor(s / 3600);
       const m = Math.floor((s % 3600) / 60);
       const sec = s % 60;
-      return `${h}h ${m}m ${sec}s`;
+      return `${h}:${m}:${sec}`;
     }
 
     function refreshWatchdog() {
@@ -174,15 +196,16 @@
         const s = Math.floor(elapsed / 1000);
         const watchdogInfo = document.getElementById("watchdog");
 
+	// TODO this needs cleaning... see exponential decay widgets
         if (s < 60) {
-          watchdogInfo.textContent = `(updated ${formatElapsed(elapsed)} ago)`;
+          watchdogInfo.textContent = `[${formatElapsed(elapsed)}]`;
         } else if (s < 3600) {
           if (s % 60 === 0) {
-            watchdogInfo.textContent = `(updated ${formatElapsed(elapsed)} ago)`;
+            watchdogInfo.textContent = `[${formatElapsed(elapsed)}]`;
           }
         } else {
           if (s % 3600 === 0) {
-            watchdogInfo.textContent = `(updated ${formatElapsed(elapsed)} ago)`;
+            watchdogInfo.textContent = `[> 1h]`;
             clearInterval(watchdogTimer);
             setMode("modeUnknown"); // watchdog fully stopped
           }
@@ -195,49 +218,53 @@
       }, 1000);
     }
 
-    function setRelayUI(relay, mode) {
+    function setRelayUI(relay, mode, state="OFF") {
       const el = document.getElementById("relay" + relay);
       const status = document.getElementById("relay" + relay + "Status");
       el.className = "v-switch " + mode;
+
+      // clear relay state indicator
+      el.classList.remove("relayOn", "relayError");
+      if (state === "ON") el.classList.add("relayOn");
+      else if (state === "ERROR") el.classList.add("relayError");
+
       el.dataset.mode = mode;
       status.textContent =
-        mode === "on" ? "Always On" :
-        mode === "pid" ? "PID Controlled" :
-        mode === "off" ? "Always Off" :
+        mode === "on" ? "On" :
+        mode === "pid" ? "PID" :
+        mode === "off" ? "Off" :
         "Unknown";
     }
 
-    function cycleRelay(relay) {
+    /* Click zones: top=on, middle=pid, bottom=off */
+    function clickRelay(event, relay) {
       const el = document.getElementById("relay" + relay);
-      const modes = ["on", "pid", "off"];
-      let idx = modes.indexOf(el.dataset.mode);
-      if (idx < 0) idx = 0;
-      idx = (idx + 1) % modes.length;
-      const newMode = modes[idx];
+      const rect = el.getBoundingClientRect();
+      const y = event.clientY - rect.top;
+      const third = rect.height / 3;
+      const newMode = (y < third) ? "on" : (y < 2*third) ? "pid" : "off";
       setRelayUI(relay, newMode);
       ws.send("relay:" + relay + ":" + newMode);
     }
 
     window.onload = () => {
       document.getElementById("selflink").href = window.location.href;
-
       ws = new WebSocket("ws://" + window.location.host + "/ws");
 
-      ws.onopen = () => console.log("WebSocket connected");
-
       ws.onmessage = (event) => {
-        console.log("Message:", event.data);
         try {
           const data = JSON.parse(event.data);
           document.getElementById("currentTemp").textContent = data.temp.toFixed(1);
           document.getElementById("targetTemp").value = data.target.toFixed(1);
-	  if (data.relayModes) {
-            const map = ["off", "pid", "on"]; // 0=off, 1=pid, 2=on
-            for (let i = 0; i < 3; i++) {
-              const st = map[data.relayModes[i]] || "modeUnknown";
-              setRelayUI(i+1, st);
-            }
+
+          const modeMap  = ["off","pid","on"];   // 0=off,1=pid,2=on
+          const stateMap = ["OFF","ON","ERROR"]; // 0=OFF,1=ON,2=ERROR
+          for (let i=0;i<3;i++) {
+            const m  = data.relayModes  ? (modeMap[data.relayModes[i]]  || "modeUnknown") : "modeUnknown";
+            const st = data.relayStates ? (stateMap[data.relayStates[i]] || "OFF")        : "OFF";
+            setRelayUI(i+1, m, st);
           }
+
           lastUpdate = Date.now();
           if (data.enabled) setMode("on");
           else setMode("off");
@@ -265,7 +292,6 @@
       setMode("modeUnknown");
       refreshWatchdog();
     };
-
   </script>
 </head>
 <body>
@@ -273,7 +299,7 @@
   <h1>Sauna Control</h1>
   <table>
     <tr>
-      <td>Power:</td>
+      <td>Main Power:</td>
       <td>
         <label id="powerWrap" class="switch modeUnknown">
           <input type="checkbox" id="powerToggle">
@@ -288,32 +314,37 @@
       <td>Current: <span id="currentTemp">--</span> °C</td>
     </tr>
     <tr>
-      <td>Phase switches:</td>
+      <td>Power switches:</td>
       <td>
-      	<table>
+        <table>
 	  <tr>
-	    <td>
-  	      <div class="v-switch modeUnknown" id="relay1" onclick="cycleRelay(1)">
-	      	<div class="knob"></div>
-	      </div>
-	    </td>
-	    <td>
-  	      <div class="v-switch modeUnknown" id="relay2" onclick="cycleRelay(2)">
-	      	<div class="knob"></div>
-	      </div>
-	    </td>
-	    <td>
-  	      <div class="v-switch modeUnknown" id="relay3" onclick="cycleRelay(3)">
-	      	<div class="knob"></div>
-	      </div>
-	    </td>
+	    <td><p><center>Phase 1</center></p></td>
+	    <td><p><center>Phase 2</center></p></td>
+	    <td><p><center>Phase 3</center></p></td>
 	  </tr>
-	</table>
-      </td>
-      <td>
-	      <p>Relay 1: <span id="relay1Status">Unknown</span></p>
-	      <p>Relay 2: <span id="relay2Status">Unknown</span></p>
-	      <p>Relay 3: <span id="relay3Status">Unknown</span></p>
+          <tr>
+            <td>
+              <div class="v-switch modeUnknown" id="relay1" onclick="clickRelay(event,1)">
+                <div class="knob"></div>
+              </div>
+            </td>
+            <td>
+              <div class="v-switch modeUnknown" id="relay2" onclick="clickRelay(event,2)">
+                <div class="knob"></div>
+              </div>
+            </td>
+            <td>
+              <div class="v-switch modeUnknown" id="relay3" onclick="clickRelay(event,3)">
+                <div class="knob"></div>
+              </div>
+            </td>
+          </tr>
+	  <tr>
+	    <td><p><center><span id="relay1Status">Unknown</span></center></p></td>
+	    <td><p><center><span id="relay2Status">Unknown</span></center></p></td>
+	    <td><p><center><span id="relay3Status">Unknown</span></center></p></td>
+	  </tr>
+        </table>
       </td>
     </tr>
   </table>
