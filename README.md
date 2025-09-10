@@ -3,14 +3,18 @@ Some electronics to control a sauna, with PID, web server.
 # Features
 
 * PID control
+* remote enable/disable (see below)
+* independant phase control
 
 
 ## TODO
 
-* RGB light
+* RGB light (connect to WLED?)
 * ice bath
 * door switch(es)
 * Timing bell and deadman's switch
+* remote set temp
+* PS-VM-RD integration
 
 
 # Hardware Stuff
@@ -42,3 +46,15 @@ pio run --target uploadfs
 pio run --target upload
 pio device monitor
 ```
+
+## Remote operation
+
+### Enable
+
+`curl http://<ip>/enable`
+
+### Disable
+
+`curl http://<ip>/disable`
+
+

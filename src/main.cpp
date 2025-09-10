@@ -8,13 +8,18 @@
 #include <LittleFS.h>
 
 // this will enable serial debugging output
-//#define SINGLEPHASE_TESTMODE
+#define SINGLEPHASE_TESTMODE
 
-const char* ssid = "engrenage";
-const char* password = "3n9r3na93";
-uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
-IPAddress local_IP(10, 11, 21, 33);
-IPAddress gateway(10, 11, 21, 13);
+const char* ssid = "Lili's house";
+const char* password = "Kaelie2016";
+uint8_t bssid[] = { 0xA0, 0xB5, 0x49, 0x9D, 0xA2, 0x48 };
+IPAddress local_IP(192,168,1,8);
+IPAddress gateway(192,168,1,1);
+//const char* ssid = "engrenage";
+//const char* password = "3n9r3na93";
+//uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
+//IPAddress local_IP(10, 11, 21, 33);
+//IPAddress gateway(10, 11, 21, 13);
 //uint8_t bssid[] = { 0x00, 0x14, 0xBF, 0xA4, 0xE9, 0x6A };	// WRT2
 //IPAddress local_IP(10, 11, 22, 33);
 //IPAddress gateway(10, 11, 22, 13);
@@ -28,7 +33,7 @@ IPAddress dns(10, 11, 12, 13);
 #define RELAY1 		D3
 #define	LED		D4
 //#define	SCLK		D5
-//#define SDO		D6
+//#define 	SDO		D6
 //#define	SDI		D7
 //#define	LATCH		D8
 #ifndef SINGLEPHASE_TESTMODE
@@ -52,20 +57,23 @@ PID myPID(&Input, &Output, &Setpoint, 2, 5, 1, DIRECT);
 bool enabled = false;
 unsigned long lastSend = 0;
 enum RelayMode { RELAY_OFF, RELAY_PID, RELAY_ON };
-RelayMode relayModes[3] = { RELAY_OFF, RELAY_OFF, RELAY_OFF };
+RelayMode relayModes[3] = { RELAY_PID, RELAY_PID, RELAY_PID };
 enum RelayStates { RELAY_IS_OFF, RELAY_IS_ON, SOMETHING_IS_BROKEN };
 RelayStates relayStates[3] = { RELAY_IS_OFF, RELAY_IS_OFF };
 
 void notifyClients() {
+  // TODO remove enabled, target, relayModes
   char msg[128];
   snprintf(msg, sizeof(msg),
-           "{\"temp\":%.2f,\"target\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
-           Input, Setpoint, 
+           "{\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
+           Input, Setpoint, Output,
 	   enabled ? "true" : "false",
            relayModes[0], relayModes[1], relayModes[2],
            relayStates[0], relayStates[1], relayStates[2]);
   ws.textAll(msg);
+#ifdef SINGLEPHASE_TESTMODE
   Serial.printf("Sent to client: %s\n", msg);
+#endif
 }
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
@@ -75,13 +83,19 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
     for (size_t i = 0; i < len; i++) {
       msg += (char)data[i];
     }
+#ifdef SINGLEPHASE_TESTMODE
     Serial.println("Received WebSocket message: " + msg);
+#endif
     if (msg == "enable") {
       enabled = true;
+#ifdef SINGLEPHASE_TESTMODE
       Serial.println("enabling");
+#endif
     } else if (msg == "disable") {
       enabled = false;
+#ifdef SINGLEPHASE_TESTMODE
       Serial.println("disabling");
+#endif
     } else if (msg.startsWith("target:")) {
       Setpoint = msg.substring(7).toFloat();
     } else if (msg.startsWith("relay:")) {
@@ -203,6 +217,37 @@ WiFi.begin(ssid, password, 0, bssid);
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
 #endif
+  server.on("/enable", HTTP_GET, [](AsyncWebServerRequest *request){
+    enabled = true;
+    request->send(200, "text/plain", "Sauna enabled");
+    notifyClients();
+  });
+  
+  server.on("/disable", HTTP_GET, [](AsyncWebServerRequest *request){
+    enabled = false;
+    request->send(200, "text/plain", "Sauna disabled");
+    notifyClients();
+  });
+  
+  server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request){
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+             "{\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
+             Input, Setpoint, Output,
+             enabled ? "true" : "false",
+             relayModes[0], relayModes[1], relayModes[2],
+             relayStates[0], relayStates[1], relayStates[2]);
+    ws.textAll(msg);
+    request->send(200, "text/plain", msg);
+  });
+  
+  /* TODO
+  server.on("/set?temp=", HTTP_GET, [](AsyncWebServerRequest *request){
+    Setpoint = ;
+    request->send(200, "text/plain", "Sauna disabled");
+    notifyClients();
+  });
+  */
 }
 
 void loop() {

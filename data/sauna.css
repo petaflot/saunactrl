@@ -1,0 +1,102 @@
+:root{
+  --power-width:60px;
+  --power-height:34px;
+  --power-padding:4px;
+}
+
+body { font-family: sans-serif; margin:20px; }
+
+/* --- Temperature / PID styles --- */
+.currentTemp { font-size: 7em; font-weight: bold; margin: 0; transition: opacity 0.5s; text-align:center; }
+.targetContainer { width:200px; height:3.2em; display:flex; align-items:center; justify-content:center; }
+.targetTempDisplay { font-size:4em; font-weight:bold; color:grey; margin:0; transition: font-size 0.3s; line-height:1; text-align:center; cursor: pointer; }
+.valueOfPID { font-size: 1.2em; font-weight: bold; margin: 0; transition: opacity 0.5s; text-align:center; }
+.tempError { font-size: 3.5em; font-weight: bold; color: red; margin: 0; text-align:center; }
+
+/* --- Power toggle (horizontal) --- */
+.switch { position: relative; display: inline-block; width: var(--power-width); height: var(--power-height); }
+.switch input { display: none; }
+.slider {
+  position: absolute; top:0; left:0; right:0; bottom:0;
+  border-radius: 999px;
+  background-color: hsl(0,0%,50%);
+  overflow:visible;
+}
+/* real DOM knob for easy sizing/centering */
+.knobPower {
+  position: absolute;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.25s, width 0.25s, height 0.25s, top 0.25s, left 0.25s;
+  will-change: transform, width, height, top, left;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+/* reload SVG */
+.power-reload-svg { position:absolute; top:50%; left:50%; transform-origin:center; transform:translate(-50%,-50%); display:none; }
+
+/* status text */
+.status { font-weight: bold; margin-left: 10px; vertical-align: middle; }
+
+/* --- Vertical relay switches (pill-shaped) --- */
+.v-switch {
+  position: relative;
+  width: 40px; height: 120px;
+  border-radius: 20px;
+  margin: 10px;
+  cursor: pointer;
+  background-color: hsl(0,0%,50%);
+  display:inline-block;
+  vertical-align: top;
+}
+.knob {
+  position: absolute;
+  background: white;
+  border-radius: 50%;
+  transition: width 0.25s, height 0.25s, top 0.25s, left 0.25s;
+  will-change: width, height, top, left;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* pill indicator inside knob (ON). It's centered via transform so it doesn't move when knob size changes */
+.knob .pill {
+  position:absolute;
+  top:50%; left:50%;
+  transform: translate(-50%,-50%) scale(1);
+  width:4px; height:20px; border-radius:2px;
+  background:black;
+  transform-origin:center;
+  transition: transform 0.25s, width 0.25s, height 0.25s;
+  pointer-events:none;
+}
+/* error X drawn with pseudo-elements on knob so it's centered regardless */
+.knob .err-x {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:18px; height:18px; pointer-events:none;
+}
+.knob .err-x:before, .knob .err-x:after {
+  content:""; position:absolute; left:0; right:0; top:50%; height:2px; background:black;
+  transform-origin:center; display:block;
+}
+.knob .err-x:before { transform: rotate(45deg); }
+.knob .err-x:after  { transform: rotate(-45deg); }
+
+/* helper classes for text status colors */
+.modeUnknown { color: gray; }
+.on { color: green; }
+.off { color: red; }
+.pending { color: orange; }
+.expired { color: darkred; }
+
+/* layout */
+table { width: 100%; max-width: 900px; border-collapse: collapse; }
+td { vertical-align: top; padding: 6px; }
+.relays-row { display:flex; gap:12px; align-items:center; }
+.relay-label { text-align:center; margin:0; font-size:1.2em; font-weight:bold; }
+.relay-status { text-align:center; margin-top:6px; }
+
+/* rotation animation for reload arrow (CCW) */
+@keyframes spinccw {
+  0% { transform: translate(-50%,-50%) rotate(0deg); }
+  100% { transform: translate(-50%,-50%) rotate(-360deg); }
+}
+

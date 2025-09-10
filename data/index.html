@@ -1,353 +1,95 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   <title>Sauna Control</title>
-  <style>
-    body { font-family: sans-serif; }
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 60px;
-      height: 34px;
-    }
-    .switch input {
-      display: none;
-    }
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc;
-      transition: 0.4s;
-      border-radius: 34px;
-    }
-    .slider:before {
-      position: absolute;
-      content: "";
-      left: 4px; bottom: 4px;
-      background-color: white;
-      transition: 0.4s;
-      border-radius: 50%;
-    }
-
-    /* Mode colors */
-    .switch.on .slider { background-color: #4CAF50; }
-    .switch.off .slider { background-color: #ccc; }
-    .switch.on-pending .slider { background-color: #ABFFBA; }
-    .switch.off-pending .slider { background-color: #FFBCAB; }
-    .switch.on-expired .slider { background-color: #ABFFBA; }
-    .switch.off-expired .slider { background-color: #FFBCAB; }
-    .switch.modeUnknown .slider { background-color: #ccc; }
-
-    /* Dot positions */
-    .switch.on .slider:before,
-    .switch.on-pending .slider:before,
-    .switch.on-expired .slider:before { transform: translateX(26px); }
-
-    /* Dot sizes */
-    .switch.on .slider:before,
-    .switch.off .slider:before {
-      height: 26px; width: 26px; visibility: visible;
-    }
-    .switch.on-pending .slider:before,
-    .switch.off-pending .slider:before {
-      height: 13px; width: 13px; top: 10px; left: 10px;
-    }
-    .switch.on-pending .slider:before { transform: translateX(26px); }
-    .switch.on-expired .slider:before,
-    .switch.off-expired .slider:before {
-      height: 8px; width: 8px; top: 13px; left: 13px;
-    }
-    .switch.on-expired .slider:before { transform: translateX(26px); }
-    .switch.modeUnknown .slider:before { visibility: hidden; }
-
-    /* Text colors */
-    .status { font-weight: bold; margin-left: 10px; }
-    .modeUnknown { color: gray; }
-    .on { color: green; }
-    .off { color: red; }
-    .pending { color: orange; }
-    .expired { color: darkred; }
-
-    /* Vertical relay switches */
-    .v-switch {
-      position: relative;
-      width: 40px;
-      height: 120px;
-      background: #ccc;
-      border-radius: 20px;
-      margin: 20px;
-      cursor: pointer;
-    }
-    .knob {
-      position: absolute;
-      left: 5px;
-      width: 30px;
-      height: 30px;
-      background: white;
-      border-radius: 50%;
-      transition: 0.3s;
-    }
-
-    /* Indicator inside knob */
-    .knob::after,
-    .knob::before {
-      content: "";
-      position: absolute;
-      display: none;
-      background: black;
-    }
-    /* ON = vertical pill */
-    .relayOn .knob::after {
-      display: block;
-      top: 5px;
-      left: 13px;
-      width: 4px;
-      height: 20px;
-      border-radius: 2px;
-    }
-    /* ERROR = black X */
-    .relayError .knob::before,
-    .relayError .knob::after {
-      display: block;
-      top: 14px;
-      left: 6px;
-      width: 18px;
-      height: 2px;
-      transform-origin: center;
-    }
-    .relayError .knob::before { transform: rotate(45deg); }
-    .relayError .knob::after  { transform: rotate(-45deg); }
-
-    /* Switch states */
-    .v-switch.on      { background: #4CAF50; }
-    .v-switch.pid     { background: #2196F3; }
-    .v-switch.off     { background: #f44336; }
-    .v-switch.modeUnknown { background: #999; }
-
-    /* Knob positions */
-    .v-switch.on .knob      { top: 5px; }
-    .v-switch.pid .knob     { top: 45px; }
-    .v-switch.off .knob     { top: 85px; }
-    .v-switch.modeUnknown .knob { top: 45px; visibility: hidden; }
-  </style>
-  <script>
-    let ws;
-    let lastUpdate = 0;
-    let watchdogTimer;
-    let mode = "modeUnknown";
-
-    function setMode(newMode) {
-      mode = newMode;
-      const statusEl = document.getElementById("status");
-      const toggleWrap = document.getElementById("powerWrap");
-
-      toggleWrap.className = "switch " + mode;
-
-      switch (mode) {
-        case "modeUnknown":
-          statusEl.textContent = "Unknown";
-          statusEl.className = "status modeUnknown";
-          break;
-        case "on":
-          statusEl.textContent = "On";
-          statusEl.className = "status on";
-          break;
-        case "off":
-          statusEl.textContent = "Off";
-          statusEl.className = "status off";
-          break;
-        case "on-pending":
-          statusEl.textContent = "On (pending)";
-          statusEl.className = "status pending";
-          break;
-        case "off-pending":
-          statusEl.textContent = "Off (pending)";
-          statusEl.className = "status pending";
-          break;
-        case "on-expired":
-          statusEl.textContent = "On (expired)";
-          statusEl.className = "status expired";
-          break;
-        case "off-expired":
-          statusEl.textContent = "Off (expired)";
-          statusEl.className = "status expired";
-          break;
-      }
-    }
-
-    function formatElapsed(ms) {
-      const s = Math.floor(ms / 1000);
-      const h = Math.floor(s / 3600);
-      const m = Math.floor((s % 3600) / 60);
-      const sec = s % 60;
-      return `${h}:${m}:${sec}`;
-    }
-
-    function refreshWatchdog() {
-      clearInterval(watchdogTimer);
-
-      watchdogTimer = setInterval(() => {
-        if (!lastUpdate) return;
-
-        const now = Date.now();
-        const elapsed = now - lastUpdate;
-        const s = Math.floor(elapsed / 1000);
-        const watchdogInfo = document.getElementById("watchdog");
-
-	// TODO this needs cleaning... see exponential decay widgets
-        if (s < 60) {
-          watchdogInfo.textContent = `[${formatElapsed(elapsed)}]`;
-        } else if (s < 3600) {
-          if (s % 60 === 0) {
-            watchdogInfo.textContent = `[${formatElapsed(elapsed)}]`;
-          }
-        } else {
-          if (s % 3600 === 0) {
-            watchdogInfo.textContent = `[> 1h]`;
-            clearInterval(watchdogTimer);
-            setMode("modeUnknown"); // watchdog fully stopped
-          }
-        }
-
-        if (s >= 12 && s < 3600) {
-          if (mode === "on" || mode === "on-pending") setMode("on-expired");
-          else if (mode === "off" || mode === "off-pending") setMode("off-expired");
-        }
-      }, 1000);
-    }
-
-    function setRelayUI(relay, mode, state="OFF") {
-      const el = document.getElementById("relay" + relay);
-      const status = document.getElementById("relay" + relay + "Status");
-      el.className = "v-switch " + mode;
-
-      // clear relay state indicator
-      el.classList.remove("relayOn", "relayError");
-      if (state === "ON") el.classList.add("relayOn");
-      else if (state === "ERROR") el.classList.add("relayError");
-
-      el.dataset.mode = mode;
-      status.textContent =
-        mode === "on" ? "On" :
-        mode === "pid" ? "PID" :
-        mode === "off" ? "Off" :
-        "Unknown";
-    }
-
-    /* Click zones: top=on, middle=pid, bottom=off */
-    function clickRelay(event, relay) {
-      const el = document.getElementById("relay" + relay);
-      const rect = el.getBoundingClientRect();
-      const y = event.clientY - rect.top;
-      const third = rect.height / 3;
-      const newMode = (y < third) ? "on" : (y < 2*third) ? "pid" : "off";
-      setRelayUI(relay, newMode);
-      ws.send("relay:" + relay + ":" + newMode);
-    }
-
-    window.onload = () => {
-      document.getElementById("selflink").href = window.location.href;
-      ws = new WebSocket("ws://" + window.location.host + "/ws");
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          document.getElementById("currentTemp").textContent = data.temp.toFixed(1);
-          document.getElementById("targetTemp").value = data.target.toFixed(1);
-
-          const modeMap  = ["off","pid","on"];   // 0=off,1=pid,2=on
-          const stateMap = ["OFF","ON","ERROR"]; // 0=OFF,1=ON,2=ERROR
-          for (let i=0;i<3;i++) {
-            const m  = data.relayModes  ? (modeMap[data.relayModes[i]]  || "modeUnknown") : "modeUnknown";
-            const st = data.relayStates ? (stateMap[data.relayStates[i]] || "OFF")        : "OFF";
-            setRelayUI(i+1, m, st);
-          }
-
-          lastUpdate = Date.now();
-          if (data.enabled) setMode("on");
-          else setMode("off");
-          refreshWatchdog();
-        } catch (e) {
-          console.error("Parse error:", e);
-        }
-      };
-
-      document.getElementById("powerToggle").onchange = (ev) => {
-        if (ev.target.checked) {
-          ws.send("enable");
-          setMode("on-pending");
-        } else {
-          ws.send("disable");
-          setMode("off-pending");
-        }
-      };
-
-      document.getElementById("targetTemp").onchange = () => {
-        const val = document.getElementById("targetTemp").value;
-        ws.send("target:" + val);
-      };
-
-      setMode("modeUnknown");
-      refreshWatchdog();
-    };
-  </script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/x-icon" href="/favicon.png">
+  <link rel="stylesheet" href="/sauna.css" />
+  <script src="/sauna.js" defer></script>
 </head>
+
 <body>
-  <p><a id="selflink" href="#">Reload page</a></p>
   <h1>Sauna Control</h1>
-  <table>
+
+  <table border=1>
     <tr>
-      <td>Main Power:</td>
+      <td><h2>Main Power</h2></td>
       <td>
-        <label id="powerWrap" class="switch modeUnknown">
-          <input type="checkbox" id="powerToggle">
-          <span class="slider"></span>
+        <label id="powerWrap" class="switch modeUnknown" role="button" aria-label="Power toggle">
+          <input type="checkbox" id="powerToggle" />
+          <span class="slider">
+            <div class="knobPower"></div>
+            <!-- rotating CCW reload SVG (hidden until reload-mode triggers) -->
+            <svg class="power-reload-svg" id="powerReloadSVG" width="48" height="48" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+		  <g
+		     fill="none"
+		     stroke="black"
+		     stroke-width="2"
+		     stroke-linecap="round"
+		     stroke-linejoin="round"
+		     id="g2">
+		    <path
+		       d="m 21,12.180525 a 9,9 0 1 0 -2.1,5.6"
+		       id="path1" />
+		    <path
+		       d="m 21,21.180525 v -6 h -6"
+		       id="path2" />
+		  </g>
+            </svg>
+          </span>
         </label>
       </td>
-      <td>Status: <span id="status" class="status modeUnknown">Unknown</span> <span id="watchdog" style="font-style:italic; color:gray;"></span></td>
+      <td>Status: <span id="status" class="status modeUnknown">Unknown</span></td>
     </tr>
+
     <tr>
-      <td>Target temperature:</td>
-      <td><input type="number" id="targetTemp" step="0.5" min="0" max="120"> °C</td>
-      <td>Current: <span id="currentTemp">--</span> °C</td>
-    </tr>
-    <tr>
-      <td>Power switches:</td>
+      <td><h2>Temperature</h2></td>
       <td>
-        <table>
-	  <tr>
-	    <td><p><center>Phase 1</center></p></td>
-	    <td><p><center>Phase 2</center></p></td>
-	    <td><p><center>Phase 3</center></p></td>
-	  </tr>
-          <tr>
-            <td>
-              <div class="v-switch modeUnknown" id="relay1" onclick="clickRelay(event,1)">
-                <div class="knob"></div>
-              </div>
-            </td>
-            <td>
-              <div class="v-switch modeUnknown" id="relay2" onclick="clickRelay(event,2)">
-                <div class="knob"></div>
-              </div>
-            </td>
-            <td>
-              <div class="v-switch modeUnknown" id="relay3" onclick="clickRelay(event,3)">
-                <div class="knob"></div>
-              </div>
-            </td>
-          </tr>
-	  <tr>
-	    <td><p><center><span id="relay1Status">Unknown</span></center></p></td>
-	    <td><p><center><span id="relay2Status">Unknown</span></center></p></td>
-	    <td><p><center><span id="relay3Status">Unknown</span></center></p></td>
-	  </tr>
-        </table>
+        <p id="currentTemp" class="currentTemp">--°C</p>
+      </td>
+      <td>
+        <div style="display:flex;flex-direction:column;align-items:center;">
+          <div class="targetContainer" title="Click to set target">
+            <p id="targetTempDisplay" class="targetTempDisplay">--°C</p>
+          </div>
+          <p id="valueOfPID" class="valueOfPID">PID: --</p>
+	</div>
+      </td>
+    </tr>
+
+    <tr>
+      <td><h2>Power switches</h2></td>
+      <td>
+        <div class="relays-row" role="group" aria-label="Phase switches">
+
+          <div style="text-align:center;">
+            <p class="relay-label">Phase 1</p>
+            <div id="relay1" class="v-switch modeUnknown" onclick="clickRelay(event,1)">
+              <div class="knob"><div class="pill"></div><div class="err-x"></div></div>
+            </div>
+            <div class="relay-status"><span id="relay1Status">--</span></div>
+          </div>
+
+          <div style="text-align:center;">
+            <p class="relay-label">Phase 2</p>
+            <div id="relay2" class="v-switch modeUnknown" onclick="clickRelay(event,2)">
+              <div class="knob"><div class="pill"></div><div class="err-x"></div></div>
+            </div>
+            <div class="relay-status"><span id="relay2Status">--</span></div>
+          </div>
+
+          <div style="text-align:center;">
+            <p class="relay-label">Phase 3</p>
+            <div id="relay3" class="v-switch modeUnknown" onclick="clickRelay(event,3)">
+              <div class="knob"><div class="pill"></div><div class="err-x"></div></div>
+            </div>
+            <div class="relay-status"><span id="relay3Status">--</span></div>
+          </div>
+        </div>
+
       </td>
     </tr>
   </table>
 </body>
 </html>
-
