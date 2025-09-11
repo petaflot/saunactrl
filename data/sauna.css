@@ -8,23 +8,58 @@ body {
 	font-family: sans-serif;
 	margin:20px;
 	background-color: #ffcc0099;
+	--sat: .2; /* initial saturation factor */
 }
+
+body::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: url('wood_vertical_wall.jpg');
+      filter: saturate(var(--sat));
+      z-index: -1; /* stay behind all content */
+    }
 
 h1{
 	background-color: #ffcc00aa;
 	padding: .6em;
-	border-top: solid 8px #ffee00dd;
-	border-left: solid 8px #ffee00dd;
-	border-bottom: solid 8px #ccaa00dd;
-	border-right: solid 8px #ccaa00dd;
+	border-bottom: solid 6px #561701;
+	border-right: solid 6px #561701;
+	border-top: solid 6px #ffbb6a;
+	border-left: solid 6px #ffbb6a;
+	background-image: url("wood_horizontal_bar.jpg");
+	background-repeat: repeat-x;
 }
 
 h2{
 	text-align: center;
+/*}
+h2.odd{*/
+	background-color: #ffcc00aa;
+	padding: .2em;
+	border-bottom: solid 2px #561701;
+	border-right: solid 2px #561701;
+	border-top: solid 2px #ffbb6a;
+	border-left: solid 2px #ffbb6a;
+	background-image: url("wood_simple.jpg");
 }
 
-.clock-hm, .timer-hm, .clock-s, .timer-s{
+
+.clock-hm, .timer-hm, .clock-s {
 	float: left;
+}
+
+ .timer-s{
+	float: bottom;
+}
+
+#timer-ctrl {
+	float: bottom;
+	font-size: 2em;
+}
+
+.clock-cal{
+	font-size: 1.8em;
 }
 
 .clock-hm{
@@ -40,34 +75,15 @@ h2{
 	font-size: 2em;
 }
 
-/*
-h2.odd{
+tr.even{
 	background-color: #ffcc00aa;
 	padding: .2em;
-	border-top: solid 2px #ffee00dd;
-	border-left: solid 2px #ffee00dd;
-	border-bottom: solid 2px #ccaa00dd;
-	border-right: solid 2px #ccaa00dd;
-}
-*/
-
-h2.odd{
-	background-color: #ffcc00aa;
-	padding: .2em;
-	border-top: solid 2px #ffee00dd;
-	border-left: solid 2px #ffee00dd;
-	border-bottom: solid 2px #ccaa00dd;
-	border-right: solid 2px #ccaa00dd;
-}
-
-.tr-even{
-	border: solid 2px;
-	background-color: #ffcc00aa;
-	padding: .2em;
-	border-top: solid 2px #ffee00dd;
-	border-left: solid 2px #ffee00dd;
-	border-bottom: solid 2px #ccaa00dd;
-	border-right: solid 2px #ccaa00dd;
+	border-bottom: solid 3px #561701;
+	border-right: solid 3px #561701;
+	border-top: solid 3px #ffbb6a;
+	border-left: solid 3px #ffbb6a;
+	background-image: url("wood_horizontal_bar.jpg");
+	background-repeat: repeat-x;
 }
 
 .clock{

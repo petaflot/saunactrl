@@ -14,6 +14,8 @@ const lastPillUpdate = [0,0,0]; // per-relay pill reset times
 let mode = "modeUnknown";
 let lastTempValue = null;
 let timerEnable = false;
+let timerSetSeconds = 0;
+let timerCurrentmsSeconds = 0;
 
 // Configurable independent half-lives (seconds)
 const halfLifeColor = 7;    // power/relay color saturation half-life
@@ -48,7 +50,9 @@ function expDecay(val0, t, halfLife, min=0){
 function updateTimer(){
   var now = new Date();
   clock = document.getElementById("clock-hm")
+  cal = document.getElementById("clock-cal")
   clock.textContent = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+  cal.textContent = `${now.getYear()+1900}-${now.getMonth().toString().padStart(2,'0')}-${now.getDay().toString().padStart(2,'0')}`;
   //const t = (now - lastUpdate)/1000;
 
   if (timerEnable) {
@@ -58,10 +62,10 @@ function updateTimer(){
       var minutes = Math.floor((interval % (1000 * 60 * 60)) / (1000 * 60));
       var seconds = Math.floor((interval % (1000 * 60)) / 1000);
 
-      document.getElementById("timer-hm").innerHTML = "-" + hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":"; + seconds.toString().padStart(2,'0');
+      document.getElementById("timer-hm").innerHTML = "-" + hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":" + seconds.toString().padStart(2,'0');
 
-      document.getElementById("timer-hm").style.color = "#bb7722ff";
-      document.getElementById("timer-s").style.color = "#bb7722ff";
+      document.getElementById("timer-hm").style.color = "#005500";
+      document.getElementById("timer-s").style.color = "#005500";
     } else {
       var hours = Math.floor((-interval % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       var minutes = Math.floor((-interval % (1000 * 60 * 60)) / (1000 * 60));
@@ -72,9 +76,8 @@ function updateTimer(){
       document.getElementById("timer-hm").style.color = "#000000";
       document.getElementById("timer-s").style.color = "#000000";
     }
+    document.getElementById("timer-s").innerHTML = ":" + seconds.toString().padStart(2,'0');
   }
-
-  document.getElementById("timer-s").innerHTML = ":" + seconds.toString().padStart(2,'0');
 
 }
 
@@ -82,8 +85,16 @@ function updateTimer(){
 function updateVisuals(){
   const now = Date.now();
   const t = (now - lastUpdate)/1000;
-  const sat = expDecay(sat0, t, halfLifeColor);
+  const sat = 100;//expDecay(sat0, t, halfLifeColor);
   const size = expDecay(size0, t, halfLifeSize, sizeMin);
+
+  // --- Background saturation ---
+  document.body.style.setProperty("--sat", sat/100);
+  document.getElementById("title").style.filter = "saturate(" + sat/100 + ")";
+  document.getElementById("title_power").style.filter = "saturate(" + sat/100 + ")";
+  document.getElementById("title_switches").style.filter = "saturate(" + sat/100 + ")";
+  document.getElementById("tr_temp").style.filter = "saturate(" + sat/100 + ")";
+  document.getElementById("tr_clock").style.filter = "saturate(" + sat/100 + ")";
 
   // --- Power switch ---
   const slider = document.querySelector("#powerWrap .slider");
@@ -111,14 +122,12 @@ function updateVisuals(){
       let hue = mode.startsWith("on") ? hueOn : hueOff;
       if (mode === "modeUnknown") slider.style.backgroundColor = "hsl(0,0%,50%)";
       else slider.style.backgroundColor = `hsl(${hue}, ${sat}%, ${lightness}%)`;
+
       knobPower.style.width = knobPower.style.height = size + "px";
-      // center knob vertically within rail:
       const railHeight = parseFloat(getComputedStyle(slider).height) || 34;
       knobPower.style.top = (railHeight-size)/2 + "px";
-
       const railWidth = parseFloat(getComputedStyle(slider).width) || 60;
       knobPower.style.left = (railWidth-size)/2 + "px";
-      //const translateX = (mode.startsWith("on")) ? (railWidth-nominalKnob - 8) : -8;
       const translateX = (mode.startsWith("off")) ? -(railWidth-nominalKnob-4)/2 : (railWidth-nominalKnob-4)/2;
       knobPower.style.transform = `translateX(${translateX}px)`;
     }
@@ -237,7 +246,25 @@ function handlePowerToggle(ev){
   }
 }
 
+function enableTimer(en) {
+  if (en) {
+    document.getElementById("timer-ctrl").innerHTML = "⏸";
+    if (countDownDate == false) {
+      countDownDate = new Date().getTime()+timerSetSeconds*1000;
+    } else {
+      countDownDate = new Date().getTime()-timerCurrentmsSeconds;
+    }
+    timerEnable = true;
+  } else {
+    timerCurrentmsSeconds = new Date().getTime() - countDownDate;
+    document.getElementById("timer-ctrl").innerHTML = "⏯";
+    timerEnable = false;
+  }
+}
+
+
 window.onload=function(){
+  countDownDate = false;
   // open socket
   ws=new WebSocket("ws://"+window.location.host+"/ws");
   ws.onmessage=(event)=>{
@@ -265,10 +292,9 @@ window.onload=function(){
 
       if (data.enabled) {
           setMode("on");
-	  //timerEnable = true;
 	} else {
 	  setMode("off");
-	  timerEnable = false;
+	  enableTimer(false);
 	}
     } catch(e){ console.error("Parse error:",e); }
   };
@@ -293,17 +319,19 @@ window.onload=function(){
     timeDisplay_hm.onclick=()=>{
       const val=prompt("Enter new timer value in minutes:","");
       if (val!==null){
-	//if (val=="") {
-	//  timerEnable = true;
-        //} else 
-	if (val>0) {
-	  timerEnable = true;
-  	  countDownDate = new Date().getTime()+val*60000;
-	//} else {
-	//  timerEnable = false;
-  	//  countDownDate = new Date().getTime()-val*60000;
+	if (val=="") {
+	  enableTimer(false);
+	  countDownDate = false
+          var hours = Math.floor((timerSetSeconds*1000 % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          var minutes = Math.floor((timerSetSeconds*1000 % (1000 * 60 * 60)) / (1000 * 60));
+          var seconds = Math.floor((timerSetSeconds*1000 % (1000 * 60)) / 1000);
+          document.getElementById("timer-hm").innerHTML = "-" + hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":" + seconds.toString().padStart(2,'0');
+          document.getElementById("timer-s").innerHTML = ":" + seconds.toString().padStart(2,'0');
+        } else if (val>=0) {
+          timerSetSeconds = val*60;
+	  enableTimer(true);
+          updateTimer();
 	}
-        updateTimer();
       }
     };
   }

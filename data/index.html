@@ -10,11 +10,11 @@
 </head>
 
 <body>
-  <h1>Sauna Control</h1>
+  <h1 id="title">Sauna Control</h1>
 
   <table>
-    <tr class="tr-odd">
-      <td><h2 class="odd">Power</h2></td>
+    <tr class="odd" id="tr_power">
+      <td><h2 class="odd" id="title_power">Power</h2></td>
       <td>
         <label id="powerWrap" class="switch modeUnknown" role="button" aria-label="Power toggle">
           <input type="checkbox" id="powerToggle" />
@@ -46,8 +46,8 @@
       </td>
     </tr>
 
-    <tr class="tr-even">
-      <td><h2 class="even">Temp.</h2></td>
+    <tr class="even" id="tr_temp">
+      <td><h2 class="even" id="title_temp">Temp.</h2></td>
       <td>
         <p id="currentTemp" class="currentTemp">--°C</p>
       </td>
@@ -61,8 +61,8 @@
       </td>
     </tr>
 
-    <tr class="tr-odd">
-      <td><h2 class="odd">Switches</h2></td>
+    <tr class="odd" id="tr_switches">
+      <td><h2 class="odd" id="title_switches">Switches</h2></td>
       <td>
         <div class="relays-row" role="group" aria-label="Phase switches">
 
@@ -93,14 +93,23 @@
 
       </td>
     </tr>
-    <tr class="tr-even clock">
+    <tr class="even clock" id="tr_clock">
       <td><h2 class="even">Clock</h2></td>
       <td>
-		<div class="clock-hm"><span id="clock-hm">--:--</span></div><!--div class="clock-s"><span id="clock-s">:00</span></div-->
+		<div class="clock-cal"><span id="clock-cal"></span></div>
+		<div class="clock-hm"><span id="clock-hm">--:--</span></div>
       </td>
       <td>
           <div class="timerContainer" title="Click to reset timer">
-		<div class="timer-hm"><span id="timer-hm">00:00</span></div><div class="timer-s"><span id="timer-s">:00</span></div>
+		<div class="timer-hm">
+			<span id="timer-hm">00:00</span>
+		</div>
+	  </div>
+	  <div>
+		<div id="timer-ctrl" onclick="enableTimer(!timerEnable)">⏯</div>
+		<div class="timer-s">
+			<span id="timer-s">:00</span>
+		</div>
 	  </div>
       </td>
       </td>

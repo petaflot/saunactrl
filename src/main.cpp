@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <EEPROM.h>
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -7,8 +8,17 @@
 #include <PID_v1.h>
 #include <LittleFS.h>
 
+#define RELAY_OPEN HIGH
+#define RELAY_CLOSED LOW
+
 // this will enable serial debugging output
 //#define SINGLEPHASE_TESTMODE
+
+#define TEMP_ABSMAX 125
+#define TEMP_ERROR -127.0
+const int EEPROM_SIZE = 32;
+const int ADDR_SETPOINT = 0;
+
 
 const char* ssid = "engrenage";
 const char* password = "3n9r3na93";
@@ -55,6 +65,20 @@ enum RelayMode { RELAY_OFF, RELAY_PID, RELAY_ON };
 RelayMode relayModes[3] = { RELAY_PID, RELAY_PID, RELAY_PID };
 enum RelayStates { RELAY_IS_OFF, RELAY_IS_ON, SOMETHING_IS_BROKEN };
 RelayStates relayStates[3] = { RELAY_IS_OFF, RELAY_IS_OFF };
+
+void saveValueToEEPROM(int save_where, double val) {
+  EEPROM.put(save_where, val);
+  EEPROM.commit();
+}
+
+void loadSetpoint() {
+  double val;
+  EEPROM.get(ADDR_SETPOINT, val);
+  if (!isnan(val) && val > 0 && val < TEMP_ABSMAX && val > TEMP_ERROR) {
+    Setpoint = val;
+  }
+}
+
 
 void notifyClients() {
   // TODO remove enabled, target, relayModes
@@ -118,6 +142,7 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
 }
 
 void setup() {
+  EEPROM.begin(EEPROM_SIZE);
 
   pinMode(LED, OUTPUT);
   pinMode(RELAY1, OUTPUT);
@@ -127,11 +152,15 @@ void setup() {
 #else
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
-  // redundant, HIGH at boot
-  digitalWrite(RELAY2, HIGH);
-  digitalWrite(RELAY3, HIGH);
+  // redundant (should be HIGH at boot)
+  digitalWrite(RELAY2, RELAY_OPEN);
+  digitalWrite(RELAY3, RELAY_OPEN);
 #endif
-  digitalWrite(RELAY1, LOW);
+  digitalWrite(RELAY1, RELAY_OPEN);
+
+  // load saved setpoint
+  loadSetpoint();
+
 
   sensors.begin();
   if (!sensors.getAddress(sensor1, 0)) {
@@ -202,7 +231,7 @@ WiFi.begin(ssid, password, 0, bssid);
 #endif
 
   myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(0, 3); // 3 relays max
+  myPID.SetOutputLimits(0, 4); // 3 relays, but non-uniform power outputs!
 
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
@@ -235,14 +264,24 @@ WiFi.begin(ssid, password, 0, bssid);
     ws.textAll(msg);
     request->send(200, "text/plain", msg);
   });
-  
-  /* TODO
-  server.on("/set?temp=", HTTP_GET, [](AsyncWebServerRequest *request){
-    Setpoint = ;
-    request->send(200, "text/plain", "Sauna disabled");
-    notifyClients();
+
+  // simple GET handler: /set?temp=75
+  server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("temp")) {
+      String val = request->getParam("temp")->value();
+      double newTarget = val.toFloat();
+      if (newTarget > 0 && newTarget < TEMP_ABSMAX) {
+        Setpoint = newTarget;
+        saveValueToEEPROM(ADDR_SETPOINT, Setpoint);	// TODO only save on explicit request!
+        request->send(200, "text/plain", "Target set to " + String(Setpoint,1));
+        Serial.println("New Setpoint: " + String(Setpoint));
+      } else {
+        request->send(400, "text/plain", "Invalid value");
+      }
+    } else {
+      request->send(400, "text/plain", "Missing ?temp=");
+    }
   });
-  */
 }
 
 void loop() {
@@ -264,21 +303,21 @@ void loop() {
   }
 
   if (enabled) {
-	digitalWrite(RELAY1, (relayModes[0] == RELAY_ON) ? LOW :
-                       (relayModes[0] == RELAY_PID && Output >= 1 ? LOW : HIGH));
+	digitalWrite(RELAY1, (relayModes[0] == RELAY_ON) ? RELAY_CLOSED :
+                       (relayModes[0] == RELAY_PID && Output >= 1 ? RELAY_CLOSED : RELAY_OPEN));
 #ifndef SINGLEPHASE_TESTMODE
 	digitalWrite(RELAY2, (relayModes[1] == RELAY_ON) ? HIGH :
-                       (relayModes[1] == RELAY_PID && Output >= 2 ? LOW : HIGH));
+                       (relayModes[1] == RELAY_PID && Output >= 2 ? RELAY_CLOSED : RELAY_OPEN));
 	digitalWrite(RELAY3, (relayModes[2] == RELAY_ON) ? HIGH :
-                       (relayModes[2] == RELAY_PID && Output >= 3 ? LOW : HIGH));
+                       (relayModes[2] == RELAY_PID && Output >= 4 ? RELAY_CLOSED : RELAY_OPEN));
 #endif
   	digitalWrite(LED, HIGH);
   } else {
   	digitalWrite(LED, LOW);
-  	digitalWrite(RELAY1, HIGH);
+  	digitalWrite(RELAY1, RELAY_OPEN);
 #ifndef SINGLEPHASE_TESTMODE
-  	digitalWrite(RELAY2, HIGH);
-  	digitalWrite(RELAY3, HIGH);
+  	digitalWrite(RELAY2, RELAY_OPEN);
+  	digitalWrite(RELAY3, RELAY_OPEN);
 #endif
   }
 
