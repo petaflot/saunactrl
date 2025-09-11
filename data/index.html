@@ -5,16 +5,16 @@
   <title>Sauna Control</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" type="image/x-icon" href="/favicon.png">
-  <link rel="stylesheet" href="/sauna.css" />
-  <script src="/sauna.js" defer></script>
+  <link rel="stylesheet" href="sauna.css" />
+  <script src="sauna.js" defer></script>
 </head>
 
 <body>
   <h1>Sauna Control</h1>
 
-  <table border=1>
-    <tr>
-      <td><h2>Main Power</h2></td>
+  <table>
+    <tr class="tr-odd">
+      <td><h2 class="odd">Power</h2></td>
       <td>
         <label id="powerWrap" class="switch modeUnknown" role="button" aria-label="Power toggle">
           <input type="checkbox" id="powerToggle" />
@@ -40,11 +40,14 @@
           </span>
         </label>
       </td>
-      <td>Status: <span id="status" class="status modeUnknown">Unknown</span></td>
+      <td>
+      	<p>Status: <span id="status" class="status modeUnknown">Unknown</span></p>
+      	<p>Door: <span id="door" class="status doorUnknown">Unknown</span></p>
+      </td>
     </tr>
 
-    <tr>
-      <td><h2>Temperature</h2></td>
+    <tr class="tr-even">
+      <td><h2 class="even">Temp.</h2></td>
       <td>
         <p id="currentTemp" class="currentTemp">--°C</p>
       </td>
@@ -58,15 +61,15 @@
       </td>
     </tr>
 
-    <tr>
-      <td><h2>Power switches</h2></td>
+    <tr class="tr-odd">
+      <td><h2 class="odd">Switches</h2></td>
       <td>
         <div class="relays-row" role="group" aria-label="Phase switches">
 
           <div style="text-align:center;">
             <p class="relay-label">Phase 1</p>
             <div id="relay1" class="v-switch modeUnknown" onclick="clickRelay(event,1)">
-              <div class="knob"><div class="pill"></div><div class="err-x"></div></div>
+              <div class="knob"><div class="pill" style="display:none"></div><div class="err-x" style="display:none"></div></div>
             </div>
             <div class="relay-status"><span id="relay1Status">--</span></div>
           </div>
@@ -74,7 +77,7 @@
           <div style="text-align:center;">
             <p class="relay-label">Phase 2</p>
             <div id="relay2" class="v-switch modeUnknown" onclick="clickRelay(event,2)">
-              <div class="knob"><div class="pill"></div><div class="err-x"></div></div>
+              <div class="knob"><div class="pill" style="display:none"></div><div class="err-x" style="display:none"></div></div>
             </div>
             <div class="relay-status"><span id="relay2Status">--</span></div>
           </div>
@@ -82,12 +85,24 @@
           <div style="text-align:center;">
             <p class="relay-label">Phase 3</p>
             <div id="relay3" class="v-switch modeUnknown" onclick="clickRelay(event,3)">
-              <div class="knob"><div class="pill"></div><div class="err-x"></div></div>
+              <div class="knob"><div class="pill" style="display:none"></div><div class="err-x" style="display:none"></div></div>
             </div>
             <div class="relay-status"><span id="relay3Status">--</span></div>
           </div>
         </div>
 
+      </td>
+    </tr>
+    <tr class="tr-even clock">
+      <td><h2 class="even">Clock</h2></td>
+      <td>
+		<div class="clock-hm"><span id="clock-hm">--:--</span></div><!--div class="clock-s"><span id="clock-s">:00</span></div-->
+      </td>
+      <td>
+          <div class="timerContainer" title="Click to reset timer">
+		<div class="timer-hm"><span id="timer-hm">00:00</span></div><div class="timer-s"><span id="timer-s">:00</span></div>
+	  </div>
+      </td>
       </td>
     </tr>
   </table>

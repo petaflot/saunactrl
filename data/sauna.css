@@ -4,7 +4,75 @@
   --power-padding:4px;
 }
 
-body { font-family: sans-serif; margin:20px; }
+body {
+	font-family: sans-serif;
+	margin:20px;
+	background-color: #ffcc0099;
+}
+
+h1{
+	background-color: #ffcc00aa;
+	padding: .6em;
+	border-top: solid 8px #ffee00dd;
+	border-left: solid 8px #ffee00dd;
+	border-bottom: solid 8px #ccaa00dd;
+	border-right: solid 8px #ccaa00dd;
+}
+
+h2{
+	text-align: center;
+}
+
+.clock-hm, .timer-hm, .clock-s, .timer-s{
+	float: left;
+}
+
+.clock-hm{
+	font-size: 4em;
+	color: #000000aa;
+}
+
+.timer-hm{
+	font-size: 5em;
+}
+
+.clock-s, .timer-s{
+	font-size: 2em;
+}
+
+/*
+h2.odd{
+	background-color: #ffcc00aa;
+	padding: .2em;
+	border-top: solid 2px #ffee00dd;
+	border-left: solid 2px #ffee00dd;
+	border-bottom: solid 2px #ccaa00dd;
+	border-right: solid 2px #ccaa00dd;
+}
+*/
+
+h2.odd{
+	background-color: #ffcc00aa;
+	padding: .2em;
+	border-top: solid 2px #ffee00dd;
+	border-left: solid 2px #ffee00dd;
+	border-bottom: solid 2px #ccaa00dd;
+	border-right: solid 2px #ccaa00dd;
+}
+
+.tr-even{
+	border: solid 2px;
+	background-color: #ffcc00aa;
+	padding: .2em;
+	border-top: solid 2px #ffee00dd;
+	border-left: solid 2px #ffee00dd;
+	border-bottom: solid 2px #ccaa00dd;
+	border-right: solid 2px #ccaa00dd;
+}
+
+.clock{
+	vertical-align: middle;	/* TODO doesn't work */
+}
 
 /* --- Temperature / PID styles --- */
 .currentTemp { font-size: 7em; font-weight: bold; margin: 0; transition: opacity 0.5s; text-align:center; }
@@ -89,7 +157,7 @@ body { font-family: sans-serif; margin:20px; }
 
 /* layout */
 table { width: 100%; max-width: 900px; border-collapse: collapse; }
-td { vertical-align: top; padding: 6px; }
+td { vertical-align: middle; padding: 6px; }
 .relays-row { display:flex; gap:12px; align-items:center; }
 .relay-label { text-align:center; margin:0; font-size:1.2em; font-weight:bold; }
 .relay-status { text-align:center; margin-top:6px; }

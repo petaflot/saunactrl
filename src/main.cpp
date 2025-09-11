@@ -8,18 +8,13 @@
 #include <LittleFS.h>
 
 // this will enable serial debugging output
-#define SINGLEPHASE_TESTMODE
+//#define SINGLEPHASE_TESTMODE
 
-const char* ssid = "Lili's house";
-const char* password = "Kaelie2016";
-uint8_t bssid[] = { 0xA0, 0xB5, 0x49, 0x9D, 0xA2, 0x48 };
-IPAddress local_IP(192,168,1,8);
-IPAddress gateway(192,168,1,1);
-//const char* ssid = "engrenage";
-//const char* password = "3n9r3na93";
-//uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
-//IPAddress local_IP(10, 11, 21, 33);
-//IPAddress gateway(10, 11, 21, 13);
+const char* ssid = "engrenage";
+const char* password = "3n9r3na93";
+uint8_t bssid[] = { 0x00, 0x1D, 0x7E, 0xFA, 0xF5, 0x2A };	// WRT1
+IPAddress local_IP(10, 11, 21, 33);
+IPAddress gateway(10, 11, 21, 13);
 //uint8_t bssid[] = { 0x00, 0x14, 0xBF, 0xA4, 0xE9, 0x6A };	// WRT2
 //IPAddress local_IP(10, 11, 22, 33);
 //IPAddress gateway(10, 11, 22, 13);

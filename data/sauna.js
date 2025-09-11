@@ -13,6 +13,7 @@ const lastPillUpdate = [0,0,0]; // per-relay pill reset times
 // modes & last values
 let mode = "modeUnknown";
 let lastTempValue = null;
+let timerEnable = false;
 
 // Configurable independent half-lives (seconds)
 const halfLifeColor = 7;    // power/relay color saturation half-life
@@ -42,6 +43,39 @@ function expDecay(val0, t, halfLife, min=0){
   const k = Math.log(2)/halfLife;
   const v = val0 * Math.exp(-k * t);
   return Math.max(v, min);
+}
+
+function updateTimer(){
+  var now = new Date();
+  clock = document.getElementById("clock-hm")
+  clock.textContent = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+  //const t = (now - lastUpdate)/1000;
+
+  if (timerEnable) {
+    var interval = countDownDate - now;
+    if (interval>0) {
+      var hours = Math.floor((interval % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      var minutes = Math.floor((interval % (1000 * 60 * 60)) / (1000 * 60));
+      var seconds = Math.floor((interval % (1000 * 60)) / 1000);
+
+      document.getElementById("timer-hm").innerHTML = "-" + hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":"; + seconds.toString().padStart(2,'0');
+
+      document.getElementById("timer-hm").style.color = "#bb7722ff";
+      document.getElementById("timer-s").style.color = "#bb7722ff";
+    } else {
+      var hours = Math.floor((-interval % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      var minutes = Math.floor((-interval % (1000 * 60 * 60)) / (1000 * 60));
+      var seconds = Math.floor((-interval % (1000 * 60)) / 1000);
+
+      document.getElementById("timer-hm").innerHTML = "+" + hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":"; + seconds;
+
+      document.getElementById("timer-hm").style.color = "#000000";
+      document.getElementById("timer-s").style.color = "#000000";
+    }
+  }
+
+  document.getElementById("timer-s").innerHTML = ":" + seconds.toString().padStart(2,'0');
+
 }
 
 // compute and apply visuals per tick
@@ -229,7 +263,13 @@ window.onload=function(){
         setRelayUI(i+1,m,st);
       }
 
-      if (data.enabled) setMode("on"); else setMode("off");
+      if (data.enabled) {
+          setMode("on");
+	  //timerEnable = true;
+	} else {
+	  setMode("off");
+	  timerEnable = false;
+	}
     } catch(e){ console.error("Parse error:",e); }
   };
 
@@ -247,7 +287,29 @@ window.onload=function(){
     };
   }
 
+  const timeDisplay_hm = document.getElementById("timer-hm");
+  const timeDisplay_s = document.getElementById("timer-s");
+  if (timeDisplay_hm) {
+    timeDisplay_hm.onclick=()=>{
+      const val=prompt("Enter new timer value in minutes:","");
+      if (val!==null){
+	//if (val=="") {
+	//  timerEnable = true;
+        //} else 
+	if (val>0) {
+	  timerEnable = true;
+  	  countDownDate = new Date().getTime()+val*60000;
+	//} else {
+	//  timerEnable = false;
+  	//  countDownDate = new Date().getTime()-val*60000;
+	}
+        updateTimer();
+      }
+    };
+  }
+
   setInterval(updateVisuals,500);
+  setInterval(updateTimer,1000);
   setMode("modeUnknown");
 };
 
