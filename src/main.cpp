@@ -363,45 +363,39 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
   }
 }
 
-// Helper: read N raw samples from the ADC for the given channel within the allotted timeslice
-// This function returns RMS voltage (V) computed by removing DC offset: sqrt(mean((v-mean)^2))
-float measureChannelRMS_rawVolts(std::function<int()> readRawFunc, uint32_t timeslice_ms) {
-  uint32_t start = millis();
-  uint32_t end = start + timeslice_ms;
-
-  // accumulate sum and sumsq
-  uint64_t sum = 0;
-  uint64_t sumSq = 0;
-  uint32_t count = 0;
-
-  // Busy-sample until timeslice ends
-  while (millis() < end) {
-    int raw = readRawFunc(); // 0..ADC_MAX
-    if (raw < 0) continue;
-    sum += (uint32_t)raw;
-    sumSq += (uint32_t)raw * (uint32_t)raw;
-    count++;
-    // small pause to avoid saturating CPU; this also slows sampling rate
-    // keep it small — we'll deliberately not delay too long because we want many samples
-    // but give a few microseconds for settling
-    delayMicroseconds(50);
+// ---- Sampling ISR ----
+void sampleADC() {
+  if (sampleCount >= SAMPLES_PER_CHANNEL) {
+    channelDone = true;
+    return;
   }
 
+  int raw;
+  if (currentMuxIs2) {
+    raw = muxSys.readMux2(currentChannel);
+  } else {
+    raw = muxSys.readMux1(currentChannel);
+  }
+
+  sampleBuffer[sampleCount++] = raw;
+}
+
+// ---- Process collected samples ----
+float computeRMS(const int *buf, int count) {
   if (count == 0) return 0.0f;
 
-  // convert sums to floats for math
-  float meanRaw = (float)sum / (float)count;
-  float meanSqRaw = (float)sumSq / (float)count;
+  double sum = 0, sumSq = 0;
+  for (int i = 0; i < count; i++) {
+    sum += buf[i];
+    sumSq += (double)buf[i] * buf[i];
+  }
+  double mean = sum / count;
+  double variance = (sumSq / count) - (mean * mean);
+  if (variance < 0) variance = 0;
+  double rmsRaw = sqrt(variance);
 
-  // variance = E[x^2] - (E[x])^2
-  float varianceRaw = meanSqRaw - (meanRaw * meanRaw);
-  if (varianceRaw < 0.0f) varianceRaw = 0.0f; // clamp numerical noise
-  float rmsRaw = sqrt(varianceRaw);
-
-  // convert raw ADC RMS to volts
-  float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / (float)ADC_MAX);
-
-  return voltsRMS;
+  float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / ADC_MAX);
+  return voltsRMS * calibrationMultiplier;
 }
 
 void setup() {
@@ -626,6 +620,7 @@ WiFi.begin(ssid, password);
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
 #endif
+  sampler.attach_ms(1000 / SAMPLE_RATE_HZ, sampleADC);
 }
 
 void loop() {
@@ -715,7 +710,20 @@ void loop() {
 #endif
   }
 
+  // PS-VM-RD voltage measure stuff
+  if (channelDone) {
+    noInterrupts();
+    int count = sampleCount;
+    int buf[SAMPLES_PER_CHANNEL];
+    memcpy((void*)buf, (const void*)sampleBuffer, count * sizeof(int));
+    sampleCount = 0;
+    channelDone = false;
+    interrupts();
+
+    float vac_rms = computeRMS(buf, count);
+
 #ifdef SINGLEPHASE_TESTMODE
+<<<<<<< HEAD
   const uint8_t ch1_count = muxSys.channels1();
   const uint8_t ch2_count = muxSys.channels2();
 
@@ -754,6 +762,22 @@ void loop() {
   }
 #endif
   // PS-VM-RD end
+
+    // Next channel
+    currentChannel++;
+    if ((!currentMuxIs2 && currentChannel >= muxSys.channels1()) ||
+        (currentMuxIs2 && currentChannel >= muxSys.channels2())) {
+      currentChannel = 0;
+      if (!currentMuxIs2 && muxSys.channels2() > 0) {
+        currentMuxIs2 = true;
+      } else {
+        currentMuxIs2 = false;
+      }
+#ifdef SINGLEPHASE_TESTMODE
+      Serial.println("---");
+#endif
+    }
+  }
 
   if (millis() - lastSend > 10000) {
     jb.addValue("temp", Input);
