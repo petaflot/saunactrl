@@ -64,6 +64,98 @@ constexpr size_t RELAY_COUNT = 1;
   #define RELAY3 		3
 #endif
 
+// PS-MV-RD starts
+// ADC calibration
+const float ADC_VOLTAGE_REF = 1.0f;   // V (ESP8266 ADC range)
+const int ADC_MAX = 1023;             // analogRead max (0..1023)
+const float calibrationMultiplier = 875.0f; // approx, may need refining and per-device (and per-channel!) tuning
+
+// Setup MUX1 (bits 0–2) and MUX2 (bits 3–5)
+HC4051 mux1(0, LATCH, SCLK, SDI);
+HC4051 mux2(1, LATCH, SCLK, SDI);
+// System: MUX2 feeds into MUX1 channel 4
+MUXSystem muxSys(AOUTA, mux1, mux2, 4);
+
+// Sampling config
+/* if sample rate is too high, WiFi starves and watchdog resets device!
+ * 250 OK, 500 NOK, 330 OK, 400 starts choking, 350 already chokes
+ * then fails at 250.. irregular ping times, I suppose two cores would be better!
+ * works so-so, definitely favor two cores there!
+ */
+const int SAMPLE_RATE_HZ = 250;
+const int BUFFER_SIZE = 100;
+
+struct ChannelBuffer {
+  int samples[BUFFER_SIZE];
+  volatile int head = 0;
+};
+
+ChannelBuffer chanBuf[16];  // up to 16 channels (8 mux1 + 8 mux2)
+
+Ticker sampler;
+int currentChannel = 0;
+bool currentMuxIs2 = false;
+
+// ---- Sampling ISR ----
+void sampleADC() {
+  int raw;
+  if (currentMuxIs2) {
+    raw = muxSys.readMux2(currentChannel);
+  } else {
+    raw = muxSys.readMux1(currentChannel);
+  }
+
+  ChannelBuffer &buf = chanBuf[currentMuxIs2 ? 8 + currentChannel : currentChannel];
+  buf.samples[buf.head] = raw;
+  buf.head = (buf.head + 1) % BUFFER_SIZE;
+  //Serial.printf("ADC sample chan %i (%i): %i\n", currentChannel, buf.head, raw);
+
+  // move to next channel
+  currentChannel++;
+  // TODO clean this shit! use a list
+  /*if (currentChannel == 0) { currentChannel = 1; }
+  if (currentChannel == 1) { currentChannel = 2; }
+  if (currentChannel == 2) { currentChannel = 3; }
+  if (currentChannel == 3) { currentChannel = 8; }
+  if (currentChannel == 8) { currentChannel = 9; }
+  if (currentChannel == 9) { currentChannel = 10; }
+  if (currentChannel == 10) { currentChannel = 11; }
+  if (currentChannel == 11) { currentChannel = 0; }*/
+
+  if ((!currentMuxIs2 && currentChannel >= muxSys.channels1()) ||
+      (currentMuxIs2 && currentChannel >= muxSys.channels2())) {
+    currentChannel = 0;
+    if (!currentMuxIs2 && muxSys.channels2() > 0) {
+      currentMuxIs2 = true;
+    } else {
+      currentMuxIs2 = false;
+    }
+  }
+}
+
+// ---- Compute RMS on demand ----
+float computeRMS(int chan) {
+  noInterrupts();
+  ChannelBuffer &buf = chanBuf[chan];
+  interrupts();
+
+  double sum = 0, sumSq = 0;
+  for (int i = 0; i < BUFFER_SIZE; i++) {
+    int v = buf.samples[i];
+    sum += v;
+    sumSq += (double)v * v;
+  }
+
+  double mean = sum / BUFFER_SIZE;
+  double variance = (sumSq / BUFFER_SIZE) - (mean * mean);
+  if (variance < 0) variance = 0;
+
+  double rmsRaw = sqrt(variance);
+  float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / ADC_MAX);
+  return voltsRMS * calibrationMultiplier;
+}
+// PS-MV-RD ends
+
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -271,6 +363,47 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
   }
 }
 
+// Helper: read N raw samples from the ADC for the given channel within the allotted timeslice
+// This function returns RMS voltage (V) computed by removing DC offset: sqrt(mean((v-mean)^2))
+float measureChannelRMS_rawVolts(std::function<int()> readRawFunc, uint32_t timeslice_ms) {
+  uint32_t start = millis();
+  uint32_t end = start + timeslice_ms;
+
+  // accumulate sum and sumsq
+  uint64_t sum = 0;
+  uint64_t sumSq = 0;
+  uint32_t count = 0;
+
+  // Busy-sample until timeslice ends
+  while (millis() < end) {
+    int raw = readRawFunc(); // 0..ADC_MAX
+    if (raw < 0) continue;
+    sum += (uint32_t)raw;
+    sumSq += (uint32_t)raw * (uint32_t)raw;
+    count++;
+    // small pause to avoid saturating CPU; this also slows sampling rate
+    // keep it small — we'll deliberately not delay too long because we want many samples
+    // but give a few microseconds for settling
+    delayMicroseconds(50);
+  }
+
+  if (count == 0) return 0.0f;
+
+  // convert sums to floats for math
+  float meanRaw = (float)sum / (float)count;
+  float meanSqRaw = (float)sumSq / (float)count;
+
+  // variance = E[x^2] - (E[x])^2
+  float varianceRaw = meanSqRaw - (meanRaw * meanRaw);
+  if (varianceRaw < 0.0f) varianceRaw = 0.0f; // clamp numerical noise
+  float rmsRaw = sqrt(varianceRaw);
+
+  // convert raw ADC RMS to volts
+  float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / (float)ADC_MAX);
+
+  return voltsRMS;
+}
+
 void setup() {
   EEPROM.begin(EEPROM_SIZE);
 
@@ -467,7 +600,7 @@ WiFi.begin(ssid, password);
       }
     }
     if (request->hasParam("relay")) {
-    String msg = request->getParam("relay")->value(); // <-- declare msg here
+      String msg = request->getParam("relay")->value();
 
     size_t r = msg.substring(6, 7).toInt() - 1;
     String mode = msg.substring(8);
@@ -476,14 +609,14 @@ WiFi.begin(ssid, password);
       if (mode == "on") relayModes[r] = RELAY_ON;
       else if (mode == "off") relayModes[r] = RELAY_OFF;
       else if (mode == "pid") relayModes[r] = RELAY_PID;
-    }
 
-    if (request->hasParam("save")) {
-      EEPROM.put(ADDR_RELAYMODES, relayModes);
+      if (request->hasParam("save")) {
+        EEPROM.put(ADDR_RELAYMODES, relayModes);
+      }
+
+      jb.addValue("relayModes", relayModes);
+      ws.textAll(jb.finish());
     }
-    jb.addValue("relayModes", relayModes);
-    ws.textAll(jb.finish());
-  }
     if (request->hasParam("save")) {
       EEPROM.commit();
     }
@@ -582,12 +715,60 @@ void loop() {
 #endif
   }
 
+#ifdef SINGLEPHASE_TESTMODE
+  const uint8_t ch1_count = muxSys.channels1();
+  const uint8_t ch2_count = muxSys.channels2();
+
+  // Partition totalWindowMs equally across all channels you will measure in one scan:
+  uint8_t totalChannelsToScan = ch1_count + ch2_count; // scanning all channels both MUX1 and MUX2
+  uint32_t timeslice_ms = totalWindowMs / totalChannelsToScan;
+  if (timeslice_ms < 10) timeslice_ms = 10; // avoid too-short slices
+
+  Serial.print("Window(ms): "); Serial.print(totalWindowMs);
+  Serial.print("  slice(ms): "); Serial.println(timeslice_ms);
+
+  // PS-VM-RD start
+  // Read MUX1 direct channels
+  /*
+   * MUX1 Ch0: input phase brown (231.6 VAC)
+   * MUX1 Ch1: input phase black
+   * MUX1 Ch2: input phase white
+   *
+   * MUX2 Ch0: output phase brown
+   * MUX2 Ch3: "input" neutral (leftmost upper nicon)
+   */
+  Serial.println("MUX1 direct RMS (VAC):");
+  for (uint8_t ch = 0; ch < ch1_count; ch++) {
+    // read lambda calls readMux1(ch) and returns raw integer
+    float volts_rms = measureChannelRMS_rawVolts([&]()->int { return muxSys.readMux1(ch); }, timeslice_ms);
+    float vac_rms = volts_rms * calibrationMultiplier;
+    Serial.printf("  MUX1 Ch%u: %0.3f V RMS   =>  %0.2f VAC\n", ch, volts_rms, vac_rms);
+  }
+
+  // Read MUX2 indirectly through MUX1
+  Serial.println("MUX2 (via MUX1 channel) RMS (VAC):");
+  for (uint8_t ch = 0; ch < ch2_count; ch++) {
+    float volts_rms = measureChannelRMS_rawVolts([&]()->int { return muxSys.readMux2(ch); }, timeslice_ms);
+    float vac_rms = volts_rms * calibrationMultiplier;
+    Serial.printf("  MUX2 Ch%u: %0.3f V RMS   =>  %0.2f VAC\n", ch, volts_rms, vac_rms);
+  }
+#endif
+  // PS-VM-RD end
+
   if (millis() - lastSend > 10000) {
     jb.addValue("temp", Input);
     jb.addValue("ambiant", Ambiant);
 #ifdef STAGED_SSRs
     jb.addValue("relayDutyCycles", relayDutyCycles);
+    // PS-VM-RD start
+    //jb.addValue("voltages", ...);
+#ifdef SINGLEPHASE_TESTMODE
+    for (int ch = 0; ch < 16; ch++) {
+      float val = computeRMS(ch);
+      Serial.printf("Ch%02d: %.2f VAC\n", ch, val);
+    }
 #endif
+    // PS-VM-RD end
     lastSend = millis();
   }
 
