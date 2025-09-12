@@ -18,7 +18,7 @@ let timerSetSeconds = 0;
 let timerCurrentmsSeconds = 0;
 
 // Configurable independent half-lives (seconds)
-const halfLifeColor = 7;    // power/relay color saturation half-life
+const halfLifeColor = 15;    // power/relay color saturation half-life
 const halfLifeSize  = 12;   // power/relay knob size half-life
 const halfLifePill  = 6;    // pill indicator shrink half-life (per-relay)
 const halfLifeAlpha  = 15;  // currentTemp opacity half-life
@@ -52,7 +52,7 @@ function updateTimer(){
   clock = document.getElementById("clock-hm")
   cal = document.getElementById("clock-cal")
   clock.textContent = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
-  cal.textContent = `${now.getYear()+1900}-${now.getMonth().toString().padStart(2,'0')}-${now.getDay().toString().padStart(2,'0')}`;
+  cal.textContent = `${now.getYear()+1900}-${(now.getMonth()+1).toString().padStart(2,'0')}-${now.getDate().toString().padStart(2,'0')}`;
   //const t = (now - lastUpdate)/1000;
 
   if (timerEnable) {
@@ -85,7 +85,7 @@ function updateTimer(){
 function updateVisuals(){
   const now = Date.now();
   const t = (now - lastUpdate)/1000;
-  const sat = 100;//expDecay(sat0, t, halfLifeColor);
+  const sat = expDecay(sat0, t, halfLifeColor);
   const size = expDecay(size0, t, halfLifeSize, sizeMin);
 
   // --- Background saturation ---
@@ -281,6 +281,9 @@ window.onload=function(){
 
       const pidText=document.getElementById("valueOfPID");
       if (pidText) pidText.textContent="PID: "+(data.pid!==undefined?data.pid.toFixed(1):"--");
+
+      const ambiantText=document.getElementById("ambiantTemp");
+      if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant!==undefined?data.ambiant.toFixed(1):"--")+"°C";
 
       const modeMap=["off","pid","on"];
       const stateMap=["OFF","ON","ERROR"];

@@ -45,7 +45,7 @@ h2.odd{*/
 }
 
 
-.clock-hm, .timer-hm, .clock-s {
+.timer-hm {
 	float: left;
 }
 
@@ -60,11 +60,13 @@ h2.odd{*/
 
 .clock-cal{
 	font-size: 1.8em;
+	text-align:center;
 }
 
 .clock-hm{
 	font-size: 4em;
 	color: #000000aa;
+	text-align:center;
 }
 
 .timer-hm{
@@ -93,8 +95,8 @@ tr.even{
 /* --- Temperature / PID styles --- */
 .currentTemp { font-size: 7em; font-weight: bold; margin: 0; transition: opacity 0.5s; text-align:center; }
 .targetContainer { width:200px; height:3.2em; display:flex; align-items:center; justify-content:center; }
-.targetTempDisplay { font-size:4em; font-weight:bold; color:grey; margin:0; transition: font-size 0.3s; line-height:1; text-align:center; cursor: pointer; }
-.valueOfPID { font-size: 1.2em; font-weight: bold; margin: 0; transition: opacity 0.5s; text-align:center; }
+.targetTempDisplay { font-size:4em; font-weight:bold; color:#00000099; margin:0; transition: font-size 0.3s; line-height:1; text-align:center; cursor: pointer; }
+.valueOfPID, .ambiantTemp { font-size: 1.2em; font-weight: bold; margin: 0; transition: opacity 0.5s; text-align:center; }
 .tempError { font-size: 3.5em; font-weight: bold; color: red; margin: 0; text-align:center; }
 
 /* --- Power toggle (horizontal) --- */
@@ -172,7 +174,7 @@ tr.even{
 .expired { color: darkred; }
 
 /* layout */
-table { width: 100%; max-width: 900px; border-collapse: collapse; }
+table { width: 100%; max-width: 1000px; border-collapse: collapse; }
 td { vertical-align: middle; padding: 6px; }
 .relays-row { display:flex; gap:12px; align-items:center; }
 .relay-label { text-align:center; margin:0; font-size:1.2em; font-weight:bold; }

@@ -49,13 +49,13 @@ IPAddress dns(10, 11, 12, 13);
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-DeviceAddress sensor1;
+DeviceAddress sensor0, sensor1;
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 // PID setup
-double Setpoint = 75.0, Input = 0, Output = 0;
+double Setpoint = 75.0, Input = 0, Output = 0, Ambiant = 0;
 PID myPID(&Input, &Output, &Setpoint, 2, 5, 1, DIRECT);
 
 // Relay control
@@ -84,8 +84,8 @@ void notifyClients() {
   // TODO remove enabled, target, relayModes
   char msg[128];
   snprintf(msg, sizeof(msg),
-           "{\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
-           Input, Setpoint, Output,
+           "{\"ambiant\":%.2f,\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
+           Ambiant, Input, Setpoint, Output,
 	   enabled ? "true" : "false",
            relayModes[0], relayModes[1], relayModes[2],
            relayStates[0], relayStates[1], relayStates[2]);
@@ -163,7 +163,7 @@ void setup() {
 
 
   sensors.begin();
-  if (!sensors.getAddress(sensor1, 0)) {
+  if (!sensors.getAddress(sensor0, 0)) {
 #ifdef SINGLEPHASE_TESTMODE
     Serial.println("No temperature sensor found");
 #endif
@@ -171,6 +171,21 @@ void setup() {
   } else {
 #ifdef SINGLEPHASE_TESTMODE
     Serial.print("Sensor 0 address: ");
+    for (uint8_t i = 0; i < 8; i++) {
+      Serial.printf("%02X", sensor0[i]);
+    }
+    Serial.println();
+#endif
+  }
+
+  if (!sensors.getAddress(sensor1, 1)) {
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.println("No second temperature sensor found");
+#endif
+    //return;
+  } else {
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.print("Sensor 1 address: ");
     for (uint8_t i = 0; i < 8; i++) {
       Serial.printf("%02X", sensor1[i]);
     }
@@ -286,7 +301,8 @@ WiFi.begin(ssid, password, 0, bssid);
 
 void loop() {
   sensors.requestTemperatures();
-  Input = sensors.getTempC(sensor1);
+  Input = sensors.getTempC(sensor0);
+  Ambiant = sensors.getTempC(sensor1);
 
   if (Input == DEVICE_DISCONNECTED_C) {
 #ifdef SINGLEPHASE_TESTMODE
