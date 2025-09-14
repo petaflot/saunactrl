@@ -41,7 +41,13 @@
         </label>
       </td>
       <td>
-      	<p>Status: <span id="status" class="status modeUnknown">Unknown</span></p>
+        <p class="voltage input">N: <span id="voltage-inN">--</span></p>
+        <p class="voltage input">R: <span id="voltage-inR">--</span></p>
+        <p class="voltage input">S: <span id="voltage-inS">--</span></p>
+        <p class="voltage input">T: <span id="voltage-inT">--</span></p>
+      </td>
+      <td>
+	<p>Status: <span id="status" class="status modeUnknown">Unknown</span></p>
       	<p>Door: <span id="door_status">Unknown</span></p>
       </td>
     </tr>
@@ -51,7 +57,7 @@
       <td>
         <p id="currentTemp" class="currentTemp">--°C</p>
       </td>
-      <td>
+      <td colspan=2>
         <div style="display:flex;flex-direction:column;align-items:center;">
           <div class="targetContainer" title="Click to set target">
             <p id="targetTempDisplay" class="targetTempDisplay">--°C</p>
@@ -64,7 +70,7 @@
 
     <tr class="odd" id="tr_switches">
       <td><h2 class="odd" id="title_switches">Switches</h2></td>
-      <td>
+      <td colspan=2>
         <div class="relays-row" role="group" aria-label="Phase switches">
 
           <div style="text-align:center;">
@@ -73,6 +79,7 @@
               <div class="knob"><div class="pill" style="display:none"></div><div class="err-x" style="display:none"></div></div>
             </div>
             <div class="relay-status"><span id="relay1Status">--</span></div>
+            <div class="voltage output"><span id="voltage-out1R">--</span></div>
           </div>
 
           <div style="text-align:center;">
@@ -81,6 +88,7 @@
               <div class="knob"><div class="pill" style="display:none"></div><div class="err-x" style="display:none"></div></div>
             </div>
             <div class="relay-status"><span id="relay2Status">--</span></div>
+            <div class="voltage output"><span id="voltage-out1S">--</span></div>
           </div>
 
           <div style="text-align:center;">
@@ -89,6 +97,7 @@
               <div class="knob"><div class="pill" style="display:none"></div><div class="err-x" style="display:none"></div></div>
             </div>
             <div class="relay-status"><span id="relay3Status">--</span></div>
+            <div class="voltage output"><span id="voltage-out1T">--</span></div>
           </div>
         </div>
 
@@ -100,7 +109,7 @@
 		<div class="clock-cal"><span id="clock-cal"></span></div>
 		<div class="clock-hm"><span id="clock-hm">--:--</span></div>
       </td>
-      <td>
+      <td colspan=2>
           <div class="timerContainer" title="Click to reset timer">
 		<div class="timer-hm">
 			<span id="timer-hm">00:00</span>

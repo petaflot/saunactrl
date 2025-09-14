@@ -399,6 +399,22 @@ window.onload=function(){
         if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
       }
 
+      //updateVisuals();
+
+      document.getElementById("voltage-inR").textContent = data.voltages[0].toFixed(1)+" [V]";
+      document.getElementById("voltage-inS").textContent = data.voltages[1].toFixed(1)+" [V]";
+      document.getElementById("voltage-inT").textContent = data.voltages[2].toFixed(1)+" [V]";
+      document.getElementById("voltage-inN").textContent = data.voltages[3].toFixed(1)+" [V]";
+      document.getElementById("voltage-out1R").textContent = data.voltages[4].toFixed(1)+" [V]";
+      document.getElementById("voltage-out1S").textContent = data.voltages[5].toFixed(1)+" [V]";
+      document.getElementById("voltage-out1T").textContent = data.voltages[6].toFixed(1)+" [V]";
+
+      if (data.enabled) {
+          setMode("on");
+	} else {
+	  setMode("off");
+	  enableTimer(false);
+	}
     } catch(e){ console.error("Parse error:",e); }
   };
 
