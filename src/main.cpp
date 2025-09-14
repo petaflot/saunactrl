@@ -25,7 +25,7 @@
 #define RELAY_CLOSED LOW
 
 // this will enable serial debugging output
-//#define SINGLEPHASE_TESTMODE
+#define SINGLEPHASE_TESTMODE
 
 #define TEMP_ABSMAX 125
 #define TEMP_ERROR -127.0
@@ -51,6 +51,7 @@ constexpr size_t RELAY_COUNT = 3;
   #define RELAY2 		1
   #define RELAY3 		3
 #endif
+
 
 // PS-MV-RD starts
 // ADC calibration
@@ -143,7 +144,6 @@ float computeRMS(int chan) {
   return voltsRMS * calibrationMultiplier;
 }
 // PS-MV-RD ends
-
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -321,41 +321,6 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
   } else if (type == WS_EVT_DATA) {
     handleWebSocketMessage(arg, data, len, client);
   }
-}
-
-// ---- Sampling ISR ----
-void sampleADC() {
-  if (sampleCount >= SAMPLES_PER_CHANNEL) {
-    channelDone = true;
-    return;
-  }
-
-  int raw;
-  if (currentMuxIs2) {
-    raw = muxSys.readMux2(currentChannel);
-  } else {
-    raw = muxSys.readMux1(currentChannel);
-  }
-
-  sampleBuffer[sampleCount++] = raw;
-}
-
-// ---- Process collected samples ----
-float computeRMS(const int *buf, int count) {
-  if (count == 0) return 0.0f;
-
-  double sum = 0, sumSq = 0;
-  for (int i = 0; i < count; i++) {
-    sum += buf[i];
-    sumSq += (double)buf[i] * buf[i];
-  }
-  double mean = sum / count;
-  double variance = (sumSq / count) - (mean * mean);
-  if (variance < 0) variance = 0;
-  double rmsRaw = sqrt(variance);
-
-  float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / ADC_MAX);
-  return voltsRMS * calibrationMultiplier;
 }
 
 void setup() {
@@ -544,12 +509,10 @@ WiFi.begin(ssid, password);
       } else {
         request->send(400, "text/plain", "Invalid value");
       }
-      if (request->hasParam("save")) {
-        EEPROM.put(ADDR_SETPOINT, Setpoint);
-      }
+      if (request->hasParam("save")) EEPROM.put(ADDR_SETPOINT, Setpoint);
     }
     if (request->hasParam("relay")) {
-      String msg = request->getParam("relay")->value();
+      String msg = request->getParam("relay")->value(); // <-- declare msg here
 
       int r = msg.substring(6, 7).toInt() - 1;
       String mode = msg.substring(8);
@@ -560,22 +523,20 @@ WiFi.begin(ssid, password);
         else if (mode == "pid") relayModes[r] = RELAY_PID;
       }
 
-      if (request->hasParam("save")) {
-        EEPROM.put(ADDR_RELAYMODES, relayModes);
-      }
+      if (request->hasParam("save")) EEPROM.put(ADDR_RELAYMODES, relayModes);
 
       jb.addValue("relayModes", relayModes);
       ws.textAll(jb.finish());
     }
-    if (request->hasParam("save")) {
-      EEPROM.commit();
-    }
+  }
+    if (request->hasParam("save")) EEPROM.commit();
   });
 
   server.begin();
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
 #endif
+  // PS-VM-RD
   sampler.attach_ms(1000 / SAMPLE_RATE_HZ, sampleADC);
 }
 
@@ -635,75 +596,6 @@ void loop() {
 #endif
     memcpy(lastRelayStates, relayStates, sizeof(relayStates));
     jb.addValue("relayStates", relayStates);
-  }
-
-  // PS-VM-RD voltage measure stuff
-  if (channelDone) {
-    noInterrupts();
-    int count = sampleCount;
-    int buf[SAMPLES_PER_CHANNEL];
-    memcpy((void*)buf, (const void*)sampleBuffer, count * sizeof(int));
-    sampleCount = 0;
-    channelDone = false;
-    interrupts();
-
-    float vac_rms = computeRMS(buf, count);
-
-#ifdef SINGLEPHASE_TESTMODE
-<<<<<<< HEAD
-  const uint8_t ch1_count = muxSys.channels1();
-  const uint8_t ch2_count = muxSys.channels2();
-
-  // Partition totalWindowMs equally across all channels you will measure in one scan:
-  uint8_t totalChannelsToScan = ch1_count + ch2_count; // scanning all channels both MUX1 and MUX2
-  uint32_t timeslice_ms = totalWindowMs / totalChannelsToScan;
-  if (timeslice_ms < 10) timeslice_ms = 10; // avoid too-short slices
-
-  Serial.print("Window(ms): "); Serial.print(totalWindowMs);
-  Serial.print("  slice(ms): "); Serial.println(timeslice_ms);
-
-  // PS-VM-RD start
-  // Read MUX1 direct channels
-  /*
-   * MUX1 Ch0: input phase brown (231.6 VAC)
-   * MUX1 Ch1: input phase black
-   * MUX1 Ch2: input phase white
-   *
-   * MUX2 Ch0: output phase brown
-   * MUX2 Ch3: "input" neutral (leftmost upper nicon)
-   */
-  Serial.println("MUX1 direct RMS (VAC):");
-  for (uint8_t ch = 0; ch < ch1_count; ch++) {
-    // read lambda calls readMux1(ch) and returns raw integer
-    float volts_rms = measureChannelRMS_rawVolts([&]()->int { return muxSys.readMux1(ch); }, timeslice_ms);
-    float vac_rms = volts_rms * calibrationMultiplier;
-    Serial.printf("  MUX1 Ch%u: %0.3f V RMS   =>  %0.2f VAC\n", ch, volts_rms, vac_rms);
-  }
-
-  // Read MUX2 indirectly through MUX1
-  Serial.println("MUX2 (via MUX1 channel) RMS (VAC):");
-  for (uint8_t ch = 0; ch < ch2_count; ch++) {
-    float volts_rms = measureChannelRMS_rawVolts([&]()->int { return muxSys.readMux2(ch); }, timeslice_ms);
-    float vac_rms = volts_rms * calibrationMultiplier;
-    Serial.printf("  MUX2 Ch%u: %0.3f V RMS   =>  %0.2f VAC\n", ch, volts_rms, vac_rms);
-  }
-#endif
-  // PS-VM-RD end
-
-    // Next channel
-    currentChannel++;
-    if ((!currentMuxIs2 && currentChannel >= muxSys.channels1()) ||
-        (currentMuxIs2 && currentChannel >= muxSys.channels2())) {
-      currentChannel = 0;
-      if (!currentMuxIs2 && muxSys.channels2() > 0) {
-        currentMuxIs2 = true;
-      } else {
-        currentMuxIs2 = false;
-      }
-#ifdef SINGLEPHASE_TESTMODE
-      Serial.println("---");
-#endif
-    }
   }
 
   if (millis() - lastSend > 10000) {
