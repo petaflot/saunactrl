@@ -36,7 +36,7 @@ IPAddress dns(10, 11, 12, 13);
 #define ONE_WIRE_BUS	D1      // GPIO for temperature sensors
 //#define RAON		D2
 #define RELAY1 		D3
-#define	LED		D4
+#define	DOOR_SW		D4	// NOTE: when on D4, door MUST be open for flashing!!
 //#define	SCLK		D5
 //#define 	SDO		D6
 //#define	SDI		D7
@@ -60,6 +60,7 @@ PID myPID(&Input, &Output, &Setpoint, 2, 5, 1, DIRECT);
 
 // Relay control
 bool enabled = false;
+bool door_is_open = true; // just to be safe
 unsigned long lastSend = 0;
 enum RelayMode { RELAY_OFF, RELAY_PID, RELAY_ON };
 RelayMode relayModes[3] = { RELAY_PID, RELAY_PID, RELAY_PID };
@@ -82,11 +83,11 @@ void loadSetpoint() {
 
 void notifyClients() {
   // TODO remove enabled, target, relayModes
-  char msg[128];
+  char msg[256];
   snprintf(msg, sizeof(msg),
-           "{\"ambiant\":%.2f,\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
+           "{\"ambiant\":%.2f,\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"door\":\"%s\",\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
            Ambiant, Input, Setpoint, Output,
-	   enabled ? "true" : "false",
+           enabled ? "true" : "false", door_is_open ? "open" : "closed",
            relayModes[0], relayModes[1], relayModes[2],
            relayStates[0], relayStates[1], relayStates[2]);
   ws.textAll(msg);
@@ -144,7 +145,7 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
 void setup() {
   EEPROM.begin(EEPROM_SIZE);
 
-  pinMode(LED, OUTPUT);
+  pinMode(DOOR_SW, INPUT_PULLUP);
   pinMode(RELAY1, OUTPUT);
 #ifdef SINGLEPHASE_TESTMODE
   Serial.begin(115200);
@@ -269,11 +270,11 @@ WiFi.begin(ssid, password, 0, bssid);
   });
   
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request){
-    char msg[128];
+    char msg[256];
     snprintf(msg, sizeof(msg),
-             "{\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
-             Input, Setpoint, Output,
-             enabled ? "true" : "false",
+             "{\"ambiant\":%.2f,\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"door\":\"%s\",\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
+             Ambiant, Input, Setpoint, Output,
+             enabled ? "true" : "false", door_is_open ? "open" : "closed",
              relayModes[0], relayModes[1], relayModes[2],
              relayStates[0], relayStates[1], relayStates[2]);
     ws.textAll(msg);
@@ -318,7 +319,9 @@ void loop() {
     Output = 0;
   }
 
-  if (enabled) {
+  door_is_open = digitalRead(DOOR_SW);
+
+  if (enabled && !door_is_open) {
 	digitalWrite(RELAY1, (relayModes[0] == RELAY_ON) ? RELAY_CLOSED :
                        (relayModes[0] == RELAY_PID && Output >= 1 ? RELAY_CLOSED : RELAY_OPEN));
 #ifndef SINGLEPHASE_TESTMODE
@@ -327,9 +330,7 @@ void loop() {
 	digitalWrite(RELAY3, (relayModes[2] == RELAY_ON) ? HIGH :
                        (relayModes[2] == RELAY_PID && Output >= 4 ? RELAY_CLOSED : RELAY_OPEN));
 #endif
-  	digitalWrite(LED, HIGH);
   } else {
-  	digitalWrite(LED, LOW);
   	digitalWrite(RELAY1, RELAY_OPEN);
 #ifndef SINGLEPHASE_TESTMODE
   	digitalWrite(RELAY2, RELAY_OPEN);

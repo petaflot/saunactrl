@@ -173,6 +173,8 @@ tr.even{
 .pending { color: orange; }
 .expired { color: darkred; }
 
+span#door_status { color: black; font-size: 1.5em; }
+
 /* layout */
 table { width: 100%; max-width: 1000px; border-collapse: collapse; }
 td { vertical-align: middle; padding: 6px; }

@@ -293,6 +293,13 @@ window.onload=function(){
         setRelayUI(i+1,m,st);
       }
 
+      if (data.door == "open") {
+        document.getElementById("door_status").textContent = "OPEN";
+      } else {
+        document.getElementById("door_status").textContent = "closed";
+	if (!timerEnable && mode == "on") { enableTimer(true); }
+      }
+
       if (data.enabled) {
           setMode("on");
 	} else {
