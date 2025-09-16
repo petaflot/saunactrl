@@ -1,5 +1,7 @@
 // sauna.js - controls WebSocket-driven UI, exponential decay, click handlers
 
+//console.log('Variables set:', myVar1, myVar2); NOTE for logging!!!
+
 // WebSocket
 let ws;
 
@@ -8,6 +10,7 @@ let lastUpdate = 0;         // overall last device update (used for power color/
 let lastTempUpdate = 0;     // last time temperature value updated (opacity decay)
 let lastTargetUpdate = 0;   // last time target was updated (used for target shrink reset)
 let lastPIDUpdate = 0;      // last time PID value updated (opacity)
+let lastDoorUpdate = 0;      // last time door status updated (opacity)
 const lastPillUpdate = [0,0,0]; // per-relay pill reset times
 
 // modes & last values
@@ -23,6 +26,7 @@ const halfLifeSize  = 12;   // power/relay knob size half-life
 const halfLifePill  = 6;    // pill indicator shrink half-life (per-relay)
 const halfLifeAlpha  = 15;  // currentTemp opacity half-life
 const halfLifePIDAlpha = 5; // PID opacity half-life
+const halfLifeDoorAlpha = 5; // door status opacity half-life
 const halfLifeTargetSize = 20; // target font size half-life
 const reloadTimeout = 30;   // seconds before power-toggle switches to reload mode
 
@@ -71,7 +75,7 @@ function updateTimer(){
       var minutes = Math.floor((-interval % (1000 * 60 * 60)) / (1000 * 60));
       var seconds = Math.floor((-interval % (1000 * 60)) / 1000);
 
-      document.getElementById("timer-hm").innerHTML = "+" + hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":"; + seconds;
+      document.getElementById("timer-hm").innerHTML = hours.toString().padStart(2,'0') + ":" + minutes.toString().padStart(2,'0');// + ":"; + seconds;
 
       document.getElementById("timer-hm").style.color = "#000000";
       document.getElementById("timer-s").style.color = "#000000";
@@ -180,7 +184,7 @@ function updateVisuals(){
     currentTempEl.style.opacity=1;
   } else if (lastTempValue!==null){
     const tAlpha=(Date.now()-lastTempUpdate)/1000;
-    const alpha=expDecay(1.0,tAlpha,halfLifeAlpha,0.05);
+    const alpha=expDecay(1.0,tAlpha,halfLifeAlpha,0.2);
     currentTempEl.style.opacity=alpha;
     currentTempEl.textContent=lastTempValue.toFixed(1)+"°C";
     currentTempEl.className="currentTemp";
@@ -200,8 +204,16 @@ function updateVisuals(){
   const pidEl=document.getElementById("valueOfPID");
   if (pidEl){
     const tPID=(Date.now()-lastPIDUpdate)/1000;
-    const alphaPID=expDecay(1.0,tPID,halfLifePIDAlpha,0.1);
+    const alphaPID=expDecay(1.0,tPID,halfLifePIDAlpha,0.2);
     pidEl.style.opacity=alphaPID;
+  }
+
+  // --- Door status fade ---
+  const doorEl=document.getElementById("door_status");
+  if (doorEl){
+    const tDoor=(Date.now()-lastDoorUpdate)/1000;
+    const alphaDoor=expDecay(1.0,tDoor,halfLifeDoorAlpha,0.2);
+    doorEl.style.opacity=alphaDoor;
   }
 }
 
@@ -265,6 +277,31 @@ function enableTimer(en) {
 
 window.onload=function(){
   countDownDate = false;
+  setMode("modeUnknown");     // TODO clean "modeUnknown" ; this should not not be necessary
+
+  // Fetch the JSON
+  const jsonUrl = 'http://'+window.location.host+'/status.json';
+  fetch(jsonUrl)
+      .then(response => {
+          if (!response.ok) {
+              throw new Error('Could not fetch status.json');
+          }
+          return response.json();
+      })
+      .then(data => {
+          const modeMap=["off","pid","on"];
+          const stateMap=["OFF","ON","ERROR"];
+          for (let i=0;i<3;i++){
+            const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
+            const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
+            setRelayUI(i+1,m,st);
+          }
+      })
+      .catch(error => {
+          console.error('Error fetching status.json:', error);
+      });
+
+
   // open socket
   ws=new WebSocket("ws://"+window.location.host+"/ws");
   ws.onmessage=(event)=>{
@@ -274,6 +311,7 @@ window.onload=function(){
       lastTempUpdate=Date.now();
       lastTargetUpdate=Date.now();
       lastPIDUpdate=Date.now();
+      lastDoorUpdate=Date.now();
       lastTempValue=data.temp;
 
       const targetEl=document.getElementById("targetTempDisplay");
@@ -295,9 +333,16 @@ window.onload=function(){
 
       if (data.door == "open") {
         document.getElementById("door_status").textContent = "OPEN";
-      } else {
+	// TODO try variant...
+	//document.getElementById("door_status").className = 'door_is_open';
+	document.getElementById("door_status").classList.remove('door_is_closed');
+	document.getElementById("door_status").classList.add('door_is_open');
+      } else if (document.getElementById("door_status").textContent != "closed") {
         document.getElementById("door_status").textContent = "closed";
-	if (!timerEnable && mode == "on") { enableTimer(true); }
+	//document.getElementById("door_status").className = 'door_is_closed';
+	document.getElementById("door_status").classList.remove('door_is_open');
+	document.getElementById("door_status").classList.add('door_is_closed');
+	if (mode == "on" && !timerEnable) { enableTimer(true); }
       }
 
       if (data.enabled) {
@@ -348,6 +393,5 @@ window.onload=function(){
 
   setInterval(updateVisuals,500);
   setInterval(updateTimer,1000);
-  setMode("modeUnknown");
 };
 

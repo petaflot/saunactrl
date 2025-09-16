@@ -253,6 +253,14 @@ WiFi.begin(ssid, password, 0, bssid);
 
   ws.onEvent(onEvent);
   server.addHandler(&ws);
+  server.onNotFound([](AsyncWebServerRequest *request){
+    //if(LittleFS.exists("/404.html")){
+    //  request->send(LittleFS, "/404.html", "text/html", false); // TODO write this page (and make it pretty)
+    //} else {
+      request->send(404, "text/plain", "404: Not Found");
+    //}
+  });
+
   server.begin();
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
