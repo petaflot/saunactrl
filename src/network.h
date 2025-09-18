@@ -1,0 +1,7 @@
+const char* ssid = "WiFi ESSID";
+const char* password = "WiFi password";
+uint8_t bssid[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
+IPAddress local_IP(192, 168, 1, 99);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dns(192, 168, 1, 1);
