@@ -1,6 +1,6 @@
 // sauna.js - controls WebSocket-driven UI, exponential decay, click handlers
 
-//console.log('Variables set:', myVar1, myVar2); NOTE for logging!!!
+//console.log('Variables set:', myVar1, myVar2);
 
 // WebSocket
 let ws;
@@ -15,7 +15,7 @@ const lastPillUpdate = [0,0,0]; // per-relay pill reset times
 
 // modes & last values
 let mode = "modeUnknown";
-let lastTempValue = null;
+let lastTempValue = -127.0;
 let timerEnable = false;
 let timerSetSeconds = 0;
 let timerCurrentmsSeconds = 0;
@@ -87,6 +87,7 @@ function updateTimer(){
 
 // compute and apply visuals per tick
 function updateVisuals(){
+  //console.log("updateVisuals()");
   const now = Date.now();
   const t = (now - lastUpdate)/1000;
   const sat = expDecay(sat0, t, halfLifeColor);
@@ -178,7 +179,7 @@ function updateVisuals(){
 
   // --- Current Temp ---
   const currentTempEl=document.getElementById("currentTemp");
-  if (lastTempValue===-127.0){
+  if (lastTempValue === undefined || lastTempValue === -127.0){
     currentTempEl.textContent="Temp. Error";
     currentTempEl.className="tempError";
     currentTempEl.style.opacity=1;
@@ -218,24 +219,33 @@ function updateVisuals(){
 }
 
 function setMode(newMode){
+  //console.log('Setting mode, current is:', mode);
   mode=newMode;
   const statusEl=document.getElementById("status");
   const toggleWrap=document.getElementById("powerWrap");
+  //const powerToggle = document.getElementById("powerToggle");
   toggleWrap.className="switch "+mode;
   statusEl.textContent=(mode==="on")?"On":(mode==="off")?"Off":"Unknown";
-  updateVisuals();
+  //updateVisuals();
+  //console.log('Mode set:', mode);
 }
 
-function setRelayUI(relay,mode,state="OFF"){
+function setRelayUI(relay,rmode=undefined,state=undefined){
   const el=document.getElementById("relay"+relay);
-  const status=document.getElementById("relay"+relay+"Status");
-  el.className="v-switch "+mode;
-  el.classList.remove("relayOn","relayError");
-  const knob=el.querySelector(".knob");
-  const pill=knob?knob.querySelector(".pill"):null;
-  if (state==="ON"){ el.classList.add("relayOn"); if (pill) lastPillUpdate[relay-1]=Date.now(); }
-  else if (state==="ERROR"){ el.classList.add("relayError"); }
-  status.textContent=(mode==="on")?"On":(mode==="pid")?"PID":(mode==="off")?"Off":"Unknown";
+  if (rmode !== undefined){
+    //el.className="v-switch "+rmode;
+    el.classList.remove("on", "pid", "off", "modeUnknown");
+    el.classList.add(rmode);
+    const status=document.getElementById("relay"+relay+"Status");
+    status.textContent=(rmode==="on")?"On":(rmode==="pid")?"PID":(rmode==="off")?"Off":"Unknown";
+  }
+  if (state !== undefined){
+    const knob=el.querySelector(".knob");
+    const pill=knob?knob.querySelector(".pill"):null;
+    el.classList.remove("relayOn","relayError");
+    if (state==="ON"){ el.classList.add("relayOn"); if (pill) lastPillUpdate[relay-1]=Date.now(); }
+    else if (state==="ERROR"){ el.classList.add("relayError"); }
+  }
 }
 
 function clickRelay(event,relay){
@@ -244,7 +254,7 @@ function clickRelay(event,relay){
   const y=event.clientY-rect.top;
   const third=rect.height/3;
   const newMode=(y<third)?"on":(y<2*third)?"pid":"off";
-  setRelayUI(relay,newMode);
+  //setRelayUI(relay,newMode);
   if (ws && ws.readyState===WebSocket.OPEN) ws.send("relay:"+relay+":"+newMode);
 }
 
@@ -253,8 +263,11 @@ function handlePowerToggle(ev){
   const age=(now-lastUpdate)/1000;
   if (age>reloadTimeout){ location.reload(); }
   else {
-    if (ev.target.checked){ if (ws && ws.readyState===WebSocket.OPEN) ws.send("enable"); setMode("on"); }
-    else { if (ws && ws.readyState===WebSocket.OPEN) ws.send("disable"); setMode("off"); }
+    if (ev.target.checked){
+      if (ws && ws.readyState===WebSocket.OPEN) ws.send("enable"); //setMode("on");
+    } else {
+      if (ws && ws.readyState===WebSocket.OPEN) ws.send("disable"); //setMode("off");
+    }
   }
 }
 
@@ -274,13 +287,87 @@ function enableTimer(en) {
   }
 }
 
+function setEnabled(data){
+  if (data.enabled !== undefined){
+    //console.log("setEnabled()", data);
+    if (data.enabled) {
+      setMode("on");
+    } else {
+      setMode("off");
+      enableTimer(false);
+    }
+  }
+}
+
+function setTarget(data){
+  if (data.target !== undefined){
+    const targetEl=document.getElementById("targetTempDisplay");
+    if (targetEl) targetEl.textContent=data.target.toFixed(1)+"°C";
+    lastTargetUpdate=Date.now();
+  }
+}
+
+function setPID(data){
+  if (data.pid !== undefined){
+    const pidText=document.getElementById("valueOfPID");
+    if (pidText) pidText.textContent="PID: "+(data.pid!==undefined?data.pid.toFixed(1):"--");
+    lastPIDUpdate=Date.now();
+  }
+}
+
+function setRelays(data){
+  if (data.relayModes !== undefined){
+    const modeMap=["off","pid","on"];
+    for (let i=0;i<3;i++){
+      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
+      //setRelayUI(i+1,m,st);
+      setRelayUI(i+1,rmode=m);
+    }
+    //console.log('setRelays() relayModes:', data.relayModes);
+  }
+  if (data.relayStates !== undefined){
+    const stateMap=["OFF","ON","ERROR"];
+    for (let i=0;i<3;i++){
+      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
+      setRelayUI(i+1,state=st);
+    }
+    //console.log('setRelays() relayStates:', data.relayStates);
+  }
+  // TODO clean .. why it behaves bad without it?!?
+  if (data.relayStates !== undefined && data.relayModes !== undefined){
+    const modeMap=["off","pid","on"];
+    const stateMap=["OFF","ON","ERROR"];
+    for (let i=0;i<3;i++){
+      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
+      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
+      setRelayUI(i+1,m,st);
+    }
+  }
+}
+
+function setDoor(data){
+  if (data.door !== undefined){
+    if (data.door == "open") {
+      document.getElementById("door_status").textContent = "OPEN";
+      document.getElementById("door_status").className = 'door_is_open';
+      // variant..
+      //document.getElementById("door_status").classList.remove('door_is_closed');
+      //document.getElementById("door_status").classList.add('door_is_open');
+    } else if (document.getElementById("door_status").textContent != "closed") {
+      document.getElementById("door_status").textContent = "closed";
+      document.getElementById("door_status").className = 'door_is_closed';
+      if (mode == "on" && !timerEnable) { enableTimer(true); }
+    }
+    lastDoorUpdate=Date.now();
+  }
+}
 
 window.onload=function(){
   countDownDate = false;
-  setMode("modeUnknown");     // TODO clean "modeUnknown" ; this should not not be necessary
+  //setMode("modeUnknown");     // TODO clean "modeUnknown" ; this should not not be necessary
 
   // Fetch the JSON
-  const jsonUrl = 'http://'+window.location.host+'/status.json';
+  const jsonUrl = window.location.protocol + '//' + window.location.host + '/status.json';
   fetch(jsonUrl)
       .then(response => {
           if (!response.ok) {
@@ -289,13 +376,17 @@ window.onload=function(){
           return response.json();
       })
       .then(data => {
-          const modeMap=["off","pid","on"];
-          const stateMap=["OFF","ON","ERROR"];
-          for (let i=0;i<3;i++){
-            const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
-            const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
-            setRelayUI(i+1,m,st);
-          }
+          lastUpdate=Date.now();
+          //console.log('Fetched JSON data:', data);
+          setEnabled(data);
+          setTarget(data);
+          setPID(data);
+      	  setRelays(data);
+          setDoor(data);
+
+          //console.log('Processed JSON:', data);
+
+          //updateVisuals();
       })
       .catch(error => {
           console.error('Error fetching status.json:', error);
@@ -306,51 +397,27 @@ window.onload=function(){
   ws=new WebSocket("ws://"+window.location.host+"/ws");
   ws.onmessage=(event)=>{
     try{
+      //console.log('Received WS message:', event.data);
       const data=JSON.parse(event.data);
+      // TODO move this in relevant functions
       lastUpdate=Date.now();
       lastTempUpdate=Date.now();
-      lastTargetUpdate=Date.now();
-      lastPIDUpdate=Date.now();
-      lastDoorUpdate=Date.now();
       lastTempValue=data.temp;
 
-      const targetEl=document.getElementById("targetTempDisplay");
-      if (targetEl) targetEl.textContent=data.target.toFixed(1)+"°C";
+      setEnabled(data);
+      setTarget(data);
+      setPID(data);
+      setRelays(data);
+      setDoor(data);
+      //console.log('Processed message:', data);
 
-      const pidText=document.getElementById("valueOfPID");
-      if (pidText) pidText.textContent="PID: "+(data.pid!==undefined?data.pid.toFixed(1):"--");
-
-      const ambiantText=document.getElementById("ambiantTemp");
-      if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant!==undefined?data.ambiant.toFixed(1):"--")+"°C";
-
-      const modeMap=["off","pid","on"];
-      const stateMap=["OFF","ON","ERROR"];
-      for (let i=0;i<3;i++){
-        const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
-        const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
-        setRelayUI(i+1,m,st);
+      if (data.ambiant !== undefined){
+        const ambiantText=document.getElementById("ambiantTemp");
+        if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
       }
 
-      if (data.door == "open") {
-        document.getElementById("door_status").textContent = "OPEN";
-	// TODO try variant...
-	//document.getElementById("door_status").className = 'door_is_open';
-	document.getElementById("door_status").classList.remove('door_is_closed');
-	document.getElementById("door_status").classList.add('door_is_open');
-      } else if (document.getElementById("door_status").textContent != "closed") {
-        document.getElementById("door_status").textContent = "closed";
-	//document.getElementById("door_status").className = 'door_is_closed';
-	document.getElementById("door_status").classList.remove('door_is_open');
-	document.getElementById("door_status").classList.add('door_is_closed');
-	if (mode == "on" && !timerEnable) { enableTimer(true); }
-      }
+      //updateVisuals();
 
-      if (data.enabled) {
-          setMode("on");
-	} else {
-	  setMode("off");
-	  enableTimer(false);
-	}
     } catch(e){ console.error("Parse error:",e); }
   };
 

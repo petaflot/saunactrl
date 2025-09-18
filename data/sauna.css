@@ -80,10 +80,10 @@ h2.odd{*/
 tr.even{
 	background-color: #ffcc00aa;
 	padding: .2em;
-	border-bottom: solid 3px #561701;
-	border-right: solid 3px #561701;
-	border-top: solid 3px #ffbb6a;
-	border-left: solid 3px #ffbb6a;
+	border-bottom: solid 4px #561701;
+	border-right: solid 4px #561701;
+	border-top: solid 4px #ffbb6a;
+	border-left: solid 4px #ffbb6a;
 	background-image: url("wood_horizontal_bar.jpg");
 	background-repeat: repeat-x;
 }
