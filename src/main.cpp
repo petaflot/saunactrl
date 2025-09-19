@@ -94,67 +94,78 @@ void loadRelayModes() {
   // TODO
 }
 
-// ---- Single int ----
-void notifyClients(const char *key, int value) {
-  char buffer[64];
-  snprintf(buffer, sizeof(buffer), "{\"%s\":%d}", key, value);
-#ifdef SINGLEPHASE_TESTMODE
-  //delay(1000);
-  Serial.printf("Sent int to client: %s\n", buffer);
-#endif
-  ws.textAll(buffer);
-}
+class JsonBuilder {
+public:
+  JsonBuilder() { clear(); }
 
-// ---- boolean ----
-void notifyClients(const char *key, bool value) {
-  char buffer[64];
-  snprintf(buffer, sizeof(buffer), "{\"%s\":%s}", key, value ? "true" : "false");
-#ifdef SINGLEPHASE_TESTMODE
-  Serial.printf("Sent boolean to client: %s\n", buffer);
-  //delay(1000);
-#endif
-  ws.textAll(buffer);
-}
-
-// ---- Single double ----
-void notifyClients(const char *key, double value) {
-  char buffer[64];
-  snprintf(buffer, sizeof(buffer), "{\"%s\":%.2f}", key, value); // 3 decimals
-#ifdef SINGLEPHASE_TESTMODE
-  Serial.printf("Sent double to client: %s\n", buffer);
-  //delay(1000);
-#endif
-  ws.textAll(buffer);
-}
-
-// ---- Single string ----
-void notifyClients(const char *key, const char *value) {
-  char buffer[128];
-  snprintf(buffer, sizeof(buffer), "{\"%s\":\"%s\"}", key, value);
-#ifdef SINGLEPHASE_TESTMODE
-  Serial.printf("Sent string to client: %s\n", buffer);
-  //delay(1000);
-#endif
-  ws.textAll(buffer);
-}
-
-// ---- RelayStates array ----
-// ---- RelayModes array ----
-template <typename T>
-void notifyClients(const char *key, const T *arr) {
-  char buffer[128];
-  size_t pos = snprintf(buffer, sizeof(buffer), "{\"%s\":[", key);
-
-  for (size_t i = 0; i < RELAY_COUNT; i++) {
-    pos += snprintf(buffer + pos, sizeof(buffer) - pos,
-                    (i < RELAY_COUNT - 1) ? "%d," : "%d", static_cast<int>(arr[i]));
+  void clear() {
+    pos = snprintf(buffer, sizeof(buffer), "{");
+    first = true;
   }
 
-  snprintf(buffer + pos, sizeof(buffer) - pos, "]}");
-  ws.textAll(buffer);
-}
+  // --- Single numeric or enum ---
+  template <typename T>
+  typename std::enable_if<std::is_arithmetic<T>::value || std::is_enum<T>::value>::type
+  addValue(const char *key, T value) {
+    if (!first) pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos,
+                    "\"%s\":%.3f", key, static_cast<double>(value));
+    first = false;
+  }
 
-void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
+  // --- Single string ---
+  void addValue(const char *key, const char *value) {
+    if (!first) pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos,
+                    "\"%s\":\"%s\"", key, value);
+    first = false;
+  }
+  void addValue(const char *key, const String &value) { addValue(key, value.c_str()); }
+
+  // --- Array of numeric/enums ---
+  template <typename T, size_t N>
+  void addValue(const char *key, T (&arr)[N]) {
+    if (!first) pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\"%s\":[", key);
+    for (size_t i = 0; i < N; i++) {
+      pos += snprintf(buffer + pos, sizeof(buffer) - pos,
+                      (i < N - 1) ? "%d," : "%d", static_cast<int>(arr[i]));
+    }
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "]");
+    first = false;
+  }
+
+  // --- Array of floats from function pointer ---
+  void addValue(const char *key, size_t count, float (*func)(size_t)) {
+    if (!first) pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\"%s\":[", key);
+    for (size_t i = 0; i < count; i++) {
+      float val = func(i);
+      pos += snprintf(buffer + pos, sizeof(buffer) - pos,
+                      (i < count - 1) ? "%.2f," : "%.2f", val);
+    }
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "]");
+    first = false;
+  }
+
+  const char* finish() {
+    snprintf(buffer + pos, sizeof(buffer) - pos, "}");
+    return buffer;
+  }
+
+  bool hasValues() const {
+    return !first;  // false if nothing added yet
+  }
+
+private:
+  char buffer[512];
+  size_t pos;
+  bool first;
+};
+
+JsonBuilder jb;
+
+void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
   if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
     String msg;
@@ -166,13 +177,16 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 #endif
     if (msg == "enable") {
       enabled = true;
-      notifyClients("enabled", true);
+      jb.addValue("enabled", true);
+      ws.textAll(jb.finish());
     } else if (msg == "disable") {
       enabled = false;
-      notifyClients("enabled", false);
+      jb.addValue("enabled", false);
+      ws.textAll(jb.finish());
     } else if (msg.startsWith("target:")) {
       Setpoint = msg.substring(7).toFloat();
-      notifyClients("target", Setpoint);
+      jb.addValue("target", Setpoint);
+      ws.textAll(jb.finish());
     } else if (msg.startsWith("relay:")) {
       int r = msg.substring(6,7).toInt() - 1; // relay index 0..2
       String mode = msg.substring(8);
@@ -181,30 +195,39 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
         else if (mode == "off") relayModes[r] = RELAY_OFF;
         else if (mode == "pid") relayModes[r] = RELAY_PID;
       }
-      notifyClients("relayModes", relayModes);
+      jb.addValue("relayModes", relayModes);
     } else if (msg == "enabled") {
-      client->text("enabled", enabled ? "true" : "false");
+      jb.addValue("enabled:", enabled ? "true" : "false");
+      client->text(jb.finish());
     } else if (msg = "ambiant") {
-      client->text("ambiant", Ambiant);
+      jb.addValue("ambiant", Ambiant);
+      client->text(jb.finish());
     } else if (msg = "temp") {
-      client->text("temp", Input);
+      jb.addValue("temp", Input);
+      client->text(jb.finish());
     } else if (msg = "door") {
-      client->text("door", door_is_open ? "open" : "closed");
+      jb.addValue("door", door_is_open ? "open" : "closed");
     } else if (msg = "relays") {
-      client->text("relayModes", relayModes);
-      client->text("relayModes", relayStates);
+      jb.addValue("relayModes", relayModes);
+      client->text(jb.finish());
+      jb.addValue("relayModes", relayStates);
+      client->text(jb.finish());
     }
+    jb.clear();
   }
 }
 
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
              void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
-    Serial.printf("Client connected: #%u\n", client->id());
-    //notifyClients("temp", Input);
-    //notifyClients("ambiant", Ambiant);
+    IPAddress ip = client->remoteIP();
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.printf("Client connected: #%u from %s\n", client->id(), ip.toString().c_str());
+#endif
+    jb.addValue("client", ip.toString().c_str());
+    ws.textAll(jb.finish());
   } else if (type == WS_EVT_DATA) {
-    handleWebSocketMessage(arg, data, len);
+    handleWebSocketMessage(arg, data, len, client);
   }
 }
 
@@ -347,13 +370,15 @@ WiFi.begin(ssid, password);
   server.on("/enable", HTTP_GET, [](AsyncWebServerRequest *request){
     enabled = true;
     request->send(200, "text/plain", "Sauna enabled");
-    notifyClients("enabled", true);
+    jb.addValue("enabled", true);
+    ws.textAll(jb.finish());
   });
   
   server.on("/disable", HTTP_GET, [](AsyncWebServerRequest *request){
     enabled = false;
     request->send(200, "text/plain", "Sauna disabled");
-    notifyClients("enabled", false);
+    jb.addValue("enabled", false);
+    ws.textAll(jb.finish());
   });
   
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -371,7 +396,7 @@ WiFi.begin(ssid, password);
 	Ambiant, Input, Setpoint, Output,
   enabled ? "true" : "false", door_is_open ? "open" : "closed",
 	relayModes[0], relayModes[1], relayModes[2],
-	relayStates[0], relayStates[1], relayStates[2],
+	relayStates[0], relayStates[1], relayStates[2]);
     request->send(200, "text/plain", msg);
 #ifdef SINGLEPHASE_TESTMODE
     Serial.printf("sent status.json to client: %s\n", msg);
@@ -385,7 +410,8 @@ WiFi.begin(ssid, password);
       double newTarget = val.toFloat();
       if (newTarget > 0 && newTarget < TEMP_ABSMAX) {
         Setpoint = newTarget;
-	      notifyClients( "target", Setpoint);
+	      jb.addValue( "target", Setpoint);
+        ws.textAll(jb.finish());
         request->send(200, "text/plain", "Target set to " + String(Setpoint,1));
         Serial.println("New Setpoint: " + String(Setpoint));
       } else {
@@ -410,7 +436,8 @@ WiFi.begin(ssid, password);
     if (request->hasParam("save")) {
       EEPROM.put(ADDR_RELAYMODES, relayModes);
     }
-    notifyClients("relayModes", relayModes);
+    jb.addValue("relayModes", relayModes);
+    ws.textAll(jb.finish());
   }
     if (request->hasParam("save")) {
       EEPROM.commit();
@@ -444,7 +471,7 @@ void loop() {
 
   if (door_is_open != digitalRead(DOOR_SW)){
     door_is_open = digitalRead(DOOR_SW);
-    notifyClients("door", door_is_open ? "open" : "closed");
+    jb.addValue("door", door_is_open ? "open" : "closed");
   }
 
   if (enabled && !door_is_open) {
@@ -478,13 +505,18 @@ void loop() {
     Serial.println("Relay state array changed");
 #endif
     memcpy(lastRelayStates, relayStates, sizeof(relayStates));
-    notifyClients("relayStates", relayStates);
+    jb.addValue("relayStates", relayStates);
   }
 
   if (millis() - lastSend > 10000) {
-    notifyClients("temp", Input);
-    notifyClients("ambiant", Ambiant);
+    jb.addValue("temp", Input);
+    jb.addValue("ambiant", Ambiant);
     lastSend = millis();
+  }
+
+  if (jb.hasValues()){
+    ws.textAll(jb.finish());
+    jb.clear();
   }
 
   delay(500);
