@@ -19,7 +19,20 @@ async def sender(ws):
             if not msg:  # EOF (Ctrl+D)
                 break
             msg = msg.strip()
-            if msg:
+            if msg == '?':
+                print("""Available commands (set):
+- enable
+- disable
+- target:<float temperature>
+- relay:<int>:["on"|"off"|"pid"]
+Available commands (query):
+- enabled
+- ambiant
+- temp
+- door
+- relays
+""")
+            elif msg:
                 await ws.send(msg)
                 print(f"Sent: {msg}")
     except asyncio.CancelledError:

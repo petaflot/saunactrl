@@ -182,6 +182,17 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
         else if (mode == "pid") relayModes[r] = RELAY_PID;
       }
       notifyClients("relayModes", relayModes);
+    } else if (msg == "enabled") {
+      client->text("enabled", enabled ? "true" : "false");
+    } else if (msg = "ambiant") {
+      client->text("ambiant", Ambiant);
+    } else if (msg = "temp") {
+      client->text("temp", Input);
+    } else if (msg = "door") {
+      client->text("door", door_is_open ? "open" : "closed");
+    } else if (msg = "relays") {
+      client->text("relayModes", relayModes);
+      client->text("relayModes", relayStates);
     }
   }
 }
@@ -356,16 +367,15 @@ WiFi.begin(ssid, password);
 	\"door\":\"%s\",\n\
 	\"relayModes\":[%d,%d,%d],\n\
 	\"relayStates\":[%d,%d,%d],\n\
-	\"voltages\":[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f]\n\
 }",
 	Ambiant, Input, Setpoint, Output,
   enabled ? "true" : "false", door_is_open ? "open" : "closed",
 	relayModes[0], relayModes[1], relayModes[2],
 	relayStates[0], relayStates[1], relayStates[2],
-	computeRMS(0), computeRMS(1), computeRMS(2), computeRMS(3), computeRMS(8), computeRMS(9), computeRMS(10) );
-    //ws.textAll(msg);
     request->send(200, "text/plain", msg);
+#ifdef SINGLEPHASE_TESTMODE
     Serial.printf("sent status.json to client: %s\n", msg);
+#endif
   });
 
   // simple GET handler: /set?temp=75
@@ -375,7 +385,7 @@ WiFi.begin(ssid, password);
       double newTarget = val.toFloat();
       if (newTarget > 0 && newTarget < TEMP_ABSMAX) {
         Setpoint = newTarget;
-	notifyClients( "target", Setpoint);
+	      notifyClients( "target", Setpoint);
         request->send(200, "text/plain", "Target set to " + String(Setpoint,1));
         Serial.println("New Setpoint: " + String(Setpoint));
       } else {
