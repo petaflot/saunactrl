@@ -280,8 +280,11 @@ if (!WiFi.config(local_IP, gateway, subnet, dns)) {
   Serial.println("STA failed to configure");
 #endif
 }
+#ifdef bssid
 WiFi.begin(ssid, password, 0, bssid);
-//WiFi.begin(ssid, password);
+#else
+WiFi.begin(ssid, password);
+#endif
 
 #ifdef SINGLEPHASE_TESTMODE
   Serial.print("Connecting to WiFi");
@@ -474,6 +477,6 @@ void loop() {
     lastSend = millis();
   }
 
-  delay(1000);
+  delay(500);
 }
 

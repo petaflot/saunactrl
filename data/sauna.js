@@ -10,7 +10,6 @@ let lastUpdate = 0;         // overall last device update (used for power color/
 let lastTempUpdate = 0;     // last time temperature value updated (opacity decay)
 let lastTargetUpdate = 0;   // last time target was updated (used for target shrink reset)
 let lastPIDUpdate = 0;      // last time PID value updated (opacity)
-let lastDoorUpdate = 0;      // last time door status updated (opacity)
 const lastPillUpdate = [0,0,0]; // per-relay pill reset times
 
 // modes & last values
@@ -23,10 +22,10 @@ let timerCurrentmsSeconds = 0;
 // Configurable independent half-lives (seconds)
 const halfLifeColor = 15;    // power/relay color saturation half-life
 const halfLifeSize  = 12;   // power/relay knob size half-life
-const halfLifePill  = 6;    // pill indicator shrink half-life (per-relay)
+const halfLifePill  = 6;    // pill indicator shrink half-life
 const halfLifeAlpha  = 15;  // currentTemp opacity half-life
 const halfLifePIDAlpha = 5; // PID opacity half-life
-const halfLifeDoorAlpha = 100; // door status opacity half-life
+const halfLifeDoorAlpha = 5; // door status opacity half-life
 const halfLifeTargetSize = 20; // target font size half-life
 const reloadTimeout = 30;   // seconds before power-toggle switches to reload mode
 
@@ -57,6 +56,7 @@ function updateTimer(){
   cal = document.getElementById("clock-cal")
   clock.textContent = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
   cal.textContent = `${now.getYear()+1900}-${(now.getMonth()+1).toString().padStart(2,'0')}-${now.getDate().toString().padStart(2,'0')}`;
+  //const t = (now - lastUpdate)/1000;
 
   if (timerEnable) {
     var interval = countDownDate - now;
@@ -81,10 +81,12 @@ function updateTimer(){
     }
     document.getElementById("timer-s").innerHTML = ":" + seconds.toString().padStart(2,'0');
   }
+
 }
 
 // compute and apply visuals per tick
 function updateVisuals(){
+  //console.log("updateVisuals()");
   const now = Date.now();
   const t = (now - lastUpdate)/1000;
   const sat = expDecay(sat0, t, halfLifeColor);
@@ -209,18 +211,22 @@ function updateVisuals(){
   // --- Door status fade ---
   const doorEl=document.getElementById("door_status");
   if (doorEl){
-    const tDoor=(Date.now()-lastDoorUpdate)/1000;
+    const tDoor=(Date.now()-lastUpdate)/1000;
     const alphaDoor=expDecay(1.0,tDoor,halfLifeDoorAlpha,0.2);
     doorEl.style.opacity=alphaDoor;
   }
 }
 
 function setMode(newMode){
+  //console.log('Setting mode, current is:', mode, ' -> ', newMode);
   mode=newMode;
   const statusEl=document.getElementById("status");
   const toggleWrap=document.getElementById("powerWrap");
+  //const powerToggle = document.getElementById("powerToggle");
   toggleWrap.className="switch "+(mode?"on":"off");
   statusEl.textContent=(mode)?"On":(mode==="off")?"Off":"Unknown";
+  //updateVisuals();
+  //console.log('Mode set:', mode);
 }
 
 function setRelayUI(relay,rmode=undefined,state=undefined){
@@ -310,25 +316,34 @@ function setPID(data){
 }
 
 function setRelays(data){
+  if (data.relayModes !== undefined){
+    //console.log("data.relayModes !== undefined");
+    const modeMap=["off","pid","on"];
+    for (let i=0;i<3;i++){
+      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
+      //setRelayUI(i+1,m,st);
+      setRelayUI(i+1,rmode=m);
+    }
+    //console.log('setRelays() relayModes:', data.relayModes);
+  }
+  if (data.relayStates !== undefined){
+    //console.log("data.relayStates !== undefined");
+    const stateMap=["OFF","ON","ERROR"];
+    for (let i=0;i<3;i++){
+      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
+      setRelayUI(i+1,state=st);
+    }
+    //console.log('setRelays() relayStates:', data.relayStates);
+  }
+  // TODO clean .. why it behaves bad without it?!?
   if (data.relayStates !== undefined && data.relayModes !== undefined){
+    //console.log("data.things...");
     const modeMap=["off","pid","on"];
     const stateMap=["OFF","ON","ERROR"];
     for (let i=0;i<3;i++){
       const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
       const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
       setRelayUI(i+1,m,st);
-    }
-  } else if (data.relayModes !== undefined){
-    const modeMap=["off","pid","on"];
-    for (let i=0;i<3;i++){
-      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
-      setRelayUI(i+1,rmode=m);
-    }
-  } else if (data.relayStates !== undefined){
-    const stateMap=["OFF","ON","ERROR"];
-    for (let i=0;i<3;i++){
-      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
-      setRelayUI(i+1,state=st);
     }
   }
 }
@@ -346,14 +361,14 @@ function setDoor(data){
       document.getElementById("door_status").className = 'door_is_closed';
       if (mode == "on" && !timerEnable) { enableTimer(true); }
     }
-    lastDoorUpdate=Date.now();
   }
 }
 
 window.onload=function(){
   countDownDate = false;
+  //setMode("modeUnknown");     // TODO clean "modeUnknown" ; this should not not be necessary
 
-  // Fetch the status JSON
+  // Fetch the JSON
   const jsonUrl = window.location.protocol + '//' + window.location.host + '/status.json';
   fetch(jsonUrl)
       .then(response => {
@@ -384,9 +399,7 @@ window.onload=function(){
   ws=new WebSocket("ws://"+window.location.host+"/ws");
   ws.onmessage=(event)=>{
     try{
-      //console.log('Received WS message:', event.data);
       const data=JSON.parse(event.data);
-      // TODO move this in relevant functions
       lastUpdate=Date.now();
       lastTempUpdate=Date.now();
       lastTempValue=data.temp;
@@ -396,7 +409,6 @@ window.onload=function(){
       setPID(data);
       setRelays(data);
       setDoor(data);
-      //console.log('Processed message:', data);
 
       if (data.ambiant !== undefined){
         const ambiantText=document.getElementById("ambiantTemp");
