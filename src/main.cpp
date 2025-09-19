@@ -91,7 +91,9 @@ struct ChannelBuffer {
   volatile int head = 0;
 };
 
-ChannelBuffer chanBuf[16];  // up to 16 channels (8 mux1 + 8 mux2)
+constexpr int NUM_CHANNELS = 7;
+int adcChannels[NUM_CHANNELS] = {0, 1, 2, 3, 8, 9, 10};  // mux channel numbers to read
+ChannelBuffer chanBuf[NUM_CHANNELS];  // up to 16 channels (8 mux1 + 8 mux2)
 
 Ticker sampler;
 int currentChannel = 0;
@@ -100,10 +102,12 @@ bool currentMuxIs2 = false;
 // ---- Sampling ISR ----
 void sampleADC() {
   int raw;
-  if (currentMuxIs2) {
-    raw = muxSys.readMux2(currentChannel);
+  if (adcChannels[currentChannel] >= 8) {
+    currentMuxIs2 = true;
+    raw = muxSys.readMux2(adcChannels[currentChannel]);
   } else {
-    raw = muxSys.readMux1(currentChannel);
+    currentMuxIs2 = false;
+    raw = muxSys.readMux1(adcChannels[currentChannel]);
   }
 
   ChannelBuffer &buf = chanBuf[currentMuxIs2 ? 8 + currentChannel : currentChannel];
@@ -111,26 +115,10 @@ void sampleADC() {
   buf.head = (buf.head + 1) % BUFFER_SIZE;
   //Serial.printf("ADC sample chan %i (%i): %i\n", currentChannel, buf.head, raw);
 
-  // move to next channel
-  currentChannel++;
-  // TODO clean this shit! use a list
-  /*if (currentChannel == 0) { currentChannel = 1; }
-  if (currentChannel == 1) { currentChannel = 2; }
-  if (currentChannel == 2) { currentChannel = 3; }
-  if (currentChannel == 3) { currentChannel = 8; }
-  if (currentChannel == 8) { currentChannel = 9; }
-  if (currentChannel == 9) { currentChannel = 10; }
-  if (currentChannel == 10) { currentChannel = 11; }
-  if (currentChannel == 11) { currentChannel = 0; }*/
-
-  if ((!currentMuxIs2 && currentChannel >= muxSys.channels1()) ||
-      (currentMuxIs2 && currentChannel >= muxSys.channels2())) {
+  if (currentChannel == NUM_CHANNELS){
     currentChannel = 0;
-    if (!currentMuxIs2 && muxSys.channels2() > 0) {
-      currentMuxIs2 = true;
-    } else {
-      currentMuxIs2 = false;
-    }
+  } else {
+    currentChannel++;
   }
 }
 
@@ -291,6 +279,21 @@ private:
 
 JsonBuilder jb;
 
+char getVoltages() {
+  char buffer[32];
+  size_t pos = snprintf(buffer, sizeof(buffer), "{\"%s\":[", key);
+
+  for (size_t i = 0; i < NUM_CHANNELS; i++) {
+    float val = computeRMS(i);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos,
+                    (i < NUM_CHANNELS - 1) ? "%.2f," : "%.2f", val);
+  }
+
+  snprintf(buffer + pos, sizeof(buffer) - pos, "]}");
+  return buffer;
+}
+
+
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
   if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
@@ -344,6 +347,9 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocket
 #ifdef STAGED_SSRs
       jb.addValue("relayDutyCycles", relayDutyCycles);
 #endif
+      client->text(jb.finish());
+    } else if (msg = "voltages") {
+      jb.addValue("voltages", getVoltages());
       client->text(jb.finish());
     }
     jb.clear();
@@ -681,9 +687,11 @@ void loop() {
 #ifdef SINGLEPHASE_TESTMODE
     for (int ch = 0; ch < 16; ch++) {
       float val = computeRMS(ch);
+#ifdef SINGLEPHASE_TESTMODE
       Serial.printf("Ch%02d: %.2f VAC\n", ch, val);
-    }
 #endif
+    }
+    notifyVoltages("voltages");
     // PS-VM-RD end
     lastSend = millis();
   }
