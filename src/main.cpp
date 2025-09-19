@@ -19,13 +19,14 @@
 #include <PID_v1.h>
 #include <LittleFS.h>
 #include <network.h>
+#include <hc_ad_mux.h>
 #include <Ticker.h>
 
 #define RELAY_OPEN HIGH
 #define RELAY_CLOSED LOW
 
 // this will enable serial debugging output
-#define SINGLEPHASE_TESTMODE
+//#define SINGLEPHASE_TESTMODE
 
 #define TEMP_ABSMAX 125
 #define TEMP_ERROR -127.0
@@ -74,36 +75,33 @@ MUXSystem muxSys(AOUTA, mux1, mux2, 4);
 const int SAMPLE_RATE_HZ = 250;
 const int BUFFER_SIZE = 100;
 
-struct ChannelBuffer {
-  int samples[BUFFER_SIZE];
-  volatile int head = 0;
-};
-
-constexpr int NUM_CHANNELS = 7;
+constexpr int NUM_CHANNELS = 7;  // up to 16 channels (8 mux1 + 8 mux2)
 int adcChannels[NUM_CHANNELS] = {0, 1, 2, 3, 8, 9, 10};  // mux channel numbers to read
-ChannelBuffer chanBuf[NUM_CHANNELS];  // up to 16 channels (8 mux1 + 8 mux2)
+
+struct ChannelBuffer {
+  int samples[BUFFER_SIZE];   // big buffer, lives in DRAM
+  volatile uint16_t head;     // index, volatile because ISR writes it
+};
+// One buffer per channel, allocated globally (not on stack)
+ChannelBuffer chanBuf[NUM_CHANNELS];
 
 Ticker sampler;
 int currentChannel = 0;
-bool currentMuxIs2 = false;
 
 // ---- Sampling ISR ----
 void sampleADC() {
   int raw;
   if (adcChannels[currentChannel] >= 8) {
-    currentMuxIs2 = true;
-    raw = muxSys.readMux2(adcChannels[currentChannel]);
+    raw = muxSys.readMux2(adcChannels[currentChannel]-8);
   } else {
-    currentMuxIs2 = false;
     raw = muxSys.readMux1(adcChannels[currentChannel]);
   }
 
-  ChannelBuffer &buf = chanBuf[currentMuxIs2 ? 8 + currentChannel : currentChannel];
+  ChannelBuffer &buf = chanBuf[currentChannel];
   buf.samples[buf.head] = raw;
   buf.head = (buf.head + 1) % BUFFER_SIZE;
-  //Serial.printf("ADC sample chan %i (%i): %i\n", currentChannel, buf.head, raw);
 
-  if (currentChannel == NUM_CHANNELS){
+  if (currentChannel == (NUM_CHANNELS-1)){
     currentChannel = 0;
   } else {
     currentChannel++;
@@ -238,26 +236,21 @@ public:
   }
 
 private:
-  char buffer[512];
+  char buffer[256];
   size_t pos;
   bool first;
 };
 
 JsonBuilder jb;
 
-char getVoltages() {
-  char buffer[32];
-  size_t pos = snprintf(buffer, sizeof(buffer), "{\"%s\":[", key);
-
-  for (size_t i = 0; i < NUM_CHANNELS; i++) {
-    float val = computeRMS(i);
-    pos += snprintf(buffer + pos, sizeof(buffer) - pos,
-                    (i < NUM_CHANNELS - 1) ? "%.2f," : "%.2f", val);
-  }
-
-  snprintf(buffer + pos, sizeof(buffer) - pos, "]}");
-  return buffer;
+void getVoltages(float *out) {
+    noInterrupts();
+    for (size_t i = 0; i < NUM_CHANNELS; i++) {
+        out[i] = computeRMS(i);
+    }
+    interrupts();
 }
+float volts[NUM_CHANNELS];
 
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
@@ -274,14 +267,17 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocket
       enabled = true;
       jb.addValue("enabled", true);
       ws.textAll(jb.finish());
+
     } else if (msg == "disable") {
       enabled = false;
       jb.addValue("enabled", false);
       ws.textAll(jb.finish());
+
     } else if (msg.startsWith("target:")) {
       Setpoint = msg.substring(7).toFloat();
       jb.addValue("target", Setpoint);
       ws.textAll(jb.finish());
+
     } else if (msg.startsWith("relay:")) {
       int r = msg.substring(6,7).toInt() - 1; // relay index 0..2
       String mode = msg.substring(8);
@@ -291,24 +287,32 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocket
         else if (mode == "pid") relayModes[r] = RELAY_PID;
       }
       jb.addValue("relayModes", relayModes);
+      ws.textAll(jb.finish());
+
     } else if (msg == "enabled") {
       jb.addValue("enabled:", enabled ? "true" : "false");
       client->text(jb.finish());
-    } else if (msg = "ambiant") {
+
+    } else if (msg == "ambiant") {
       jb.addValue("ambiant", Ambiant);
       client->text(jb.finish());
-    } else if (msg = "temp") {
+
+    } else if (msg == "temp") {
       jb.addValue("temp", Input);
       client->text(jb.finish());
-    } else if (msg = "door") {
+
+    } else if (msg == "door") {
       jb.addValue("door", door_is_open ? "open" : "closed");
-    } else if (msg = "relays") {
-      jb.addValue("relayModes", relayModes);
       client->text(jb.finish());
+
+    } else if (msg == "relays") {
+      jb.addValue("relayModes", relayModes);
       jb.addValue("relayModes", relayStates);
       client->text(jb.finish());
-    } else if (msg = "voltages") {
-      jb.addValue("voltages", getVoltages());
+
+    } else if (msg == "voltages") {
+      getVoltages(volts);
+      jb.addValue("voltages", volts);
       client->text(jb.finish());
     }
     jb.clear();
@@ -323,7 +327,6 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
     Serial.printf("Client connected: #%u from %s\n", client->id(), ip.toString().c_str());
 #endif
     jb.addValue("client", ip.toString().c_str());
-    ws.textAll(jb.finish());
   } else if (type == WS_EVT_DATA) {
     handleWebSocketMessage(arg, data, len, client);
   }
@@ -490,11 +493,13 @@ WiFi.begin(ssid, password);
 	\"door\":\"%s\",\n\
 	\"relayModes\":[%d,%d,%d],\n\
 	\"relayStates\":[%d,%d,%d],\n\
+  \"voltages\":[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f]\n\
 }",
 	Ambiant, Input, Setpoint, Output,
   enabled ? "true" : "false", door_is_open ? "open" : "closed",
 	relayModes[0], relayModes[1], relayModes[2],
-	relayStates[0], relayStates[1], relayStates[2]);
+	relayStates[0], relayStates[1], relayStates[2],
+  computeRMS(0), computeRMS(1), computeRMS(2), computeRMS(3), computeRMS(4), computeRMS(5), computeRMS(6) );
     request->send(200, "text/plain", msg);
 #ifdef SINGLEPHASE_TESTMODE
     Serial.printf("sent status.json to client: %s\n", msg);
@@ -534,13 +539,13 @@ WiFi.begin(ssid, password);
       jb.addValue("relayModes", relayModes);
       ws.textAll(jb.finish());
     }
-  }
     if (request->hasParam("save")) EEPROM.commit();
   });
 
   server.begin();
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
+  //Serial.printf("Free heap: %u bytes\n ; free stack: %u bytes", ESP.getFreeHeap(), cont_get_free_stack(&g_cont));
 #endif
   // PS-VM-RD
   sampler.attach_ms(1000 / SAMPLE_RATE_HZ, sampleADC);
@@ -608,13 +613,16 @@ void loop() {
     jb.addValue("temp", Input);
     jb.addValue("ambiant", Ambiant);
     // PS-VM-RD start
+/*
+#ifdef SINGLEPHASE_TESTMODE
     for (int ch = 0; ch < 16; ch++) {
       float val = computeRMS(ch);
-#ifdef SINGLEPHASE_TESTMODE
       Serial.printf("Ch%02d: %.2f VAC\n", ch, val);
-#endif
     }
-    notifyVoltages("voltages");
+#endif
+*/
+    getVoltages(volts);
+    jb.addValue("voltages", volts);
     // PS-VM-RD end
     lastSend = millis();
   }
