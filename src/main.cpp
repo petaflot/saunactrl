@@ -19,12 +19,14 @@
 #include <PID_v1.h>
 #include <LittleFS.h>
 #include <network.h>
+#include <Ticker.h>
+#include "hc_ad_mux.h"
 
 #define RELAY_OPEN HIGH
 #define RELAY_CLOSED LOW
 
 // this will enable serial debugging output
-#define SINGLEPHASE_TESTMODE
+//#define SINGLEPHASE_TESTMODE
 
 #define TEMP_ABSMAX 125
 #define TEMP_ERROR -127.0
@@ -39,15 +41,18 @@ constexpr size_t RELAY_COUNT = 3;
 //#define RAON		D2
 #define RELAY1 		D3
 #define	DOOR_SW		D4	// NOTE: when on D4, door MUST be open for flashing!!
-//#define	SCLK		D5
+#define	SCLK		D5	// 74HCT595
 //#define 	SDO		D6
-//#define	SDI		D7
-//#define	LATCH		D8
+#define	SDI		D7	// 74HCT595
+#define	LATCH		D8	// 74HCT595
+#define AOUTA		A0
+
 #ifndef SINGLEPHASE_TESTMODE
-  #define RELAY2 		3	// RX/TX TODO which one?
-  #define RELAY3 		1	// TX/RX TODO which one?
+  // on TX/RX
+  #define RELAY2 		1
+  #define RELAY3 		3
 #endif
-//#define AOUTA		A0
+
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -135,38 +140,18 @@ void notifyClients(const char *key, const char *value) {
 }
 
 // ---- RelayStates array ----
-void notifyClients(const char *key, const RelayStates *states) {
-  char buffer[128];
-  size_t pos = snprintf(buffer, sizeof(buffer), "{\"%s\":[", key);
-
-  for (size_t i = 0; i < RELAY_COUNT; i++) {
-    pos += snprintf(buffer + pos, sizeof(buffer) - pos,
-                    (i < RELAY_COUNT - 1) ? "%d," : "%d", (int)states[i]);
-  }
-
-  snprintf(buffer + pos, sizeof(buffer) - pos, "]}");
-#ifdef SINGLEPHASE_TESTMODE
-  Serial.printf("Sent RelayStates to client: %s\n", buffer);
-  //delay(1000);
-#endif
-  ws.textAll(buffer);
-}
-
 // ---- RelayModes array ----
-void notifyClients(const char *key, const RelayModes *modes) {
+template <typename T>
+void notifyClients(const char *key, const T *arr) {
   char buffer[128];
   size_t pos = snprintf(buffer, sizeof(buffer), "{\"%s\":[", key);
 
   for (size_t i = 0; i < RELAY_COUNT; i++) {
     pos += snprintf(buffer + pos, sizeof(buffer) - pos,
-                    (i < RELAY_COUNT - 1) ? "%d," : "%d", (int)modes[i]);
+                    (i < RELAY_COUNT - 1) ? "%d," : "%d", static_cast<int>(arr[i]));
   }
 
   snprintf(buffer + pos, sizeof(buffer) - pos, "]}");
-#ifdef SINGLEPHASE_TESTMODE
-  Serial.printf("Sent RelayModes to client: %s\n", buffer);
-  //delay(1000);
-#endif
   ws.textAll(buffer);
 }
 
@@ -188,6 +173,7 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
       notifyClients("enabled", false);
     } else if (msg.startsWith("target:")) {
       Setpoint = msg.substring(7).toFloat();
+      notifyClients("target", Setpoint);
     } else if (msg.startsWith("relay:")) {
       int r = msg.substring(6,7).toInt() - 1; // relay index 0..2
       String mode = msg.substring(8);
@@ -359,12 +345,22 @@ WiFi.begin(ssid, password, 0, bssid);
   
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request){
     char msg[256];
-    snprintf(msg, sizeof(msg),
-             "{\"ambiant\":%.2f,\"temp\":%.2f,\"target\":%.2f,\"pid\":%.2f,\"enabled\":%s,\"door\":\"%s\",\"relayModes\":[%d,%d,%d],\"relayStates\":[%d,%d,%d]}",
-             Ambiant, Input, Setpoint, Output,
-             enabled ? "true" : "false", door_is_open ? "open" : "closed",
-             relayModes[0], relayModes[1], relayModes[2],
-             relayStates[0], relayStates[1], relayStates[2]);
+    snprintf(msg, sizeof(msg),"{\n\
+	\"ambiant\":%.2f,\n\
+	\"temp\":%.2f,\n\
+	\"target\":%.2f,\n\
+	\"pid\":%.2f,\n\
+	\"enabled\":%s,\n\
+	\"door\":\"%s\",\n\
+	\"relayModes\":[%d,%d,%d],\n\
+	\"relayStates\":[%d,%d,%d],\n\
+	\"voltages\":[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f]\n\
+}",
+	Ambiant, Input, Setpoint, Output,
+  enabled ? "true" : "false", door_is_open ? "open" : "closed",
+	relayModes[0], relayModes[1], relayModes[2],
+	relayStates[0], relayStates[1], relayStates[2],
+	computeRMS(0), computeRMS(1), computeRMS(2), computeRMS(3), computeRMS(8), computeRMS(9), computeRMS(10) );
     //ws.textAll(msg);
     request->send(200, "text/plain", msg);
     Serial.printf("sent status.json to client: %s\n", msg);
@@ -441,12 +437,12 @@ void loop() {
 
   if (enabled && !door_is_open) {
 	digitalWrite(RELAY1, (relayModes[0] == RELAY_ON) ? RELAY_CLOSED :
-                       (relayModes[0] == RELAY_PID && Output >= 1 ? RELAY_CLOSED : RELAY_OPEN));
+		(relayModes[0] == RELAY_PID && Output >= 1 ? RELAY_CLOSED : RELAY_OPEN));
 #ifndef SINGLEPHASE_TESTMODE
-	digitalWrite(RELAY2, (relayModes[1] == RELAY_ON) ? HIGH :
-                       (relayModes[1] == RELAY_PID && Output >= 2 ? RELAY_CLOSED : RELAY_OPEN));
-	digitalWrite(RELAY3, (relayModes[2] == RELAY_ON) ? HIGH :
-                       (relayModes[2] == RELAY_PID && Output >= 4 ? RELAY_CLOSED : RELAY_OPEN));
+	digitalWrite(RELAY2, (relayModes[1] == RELAY_ON) ? RELAY_CLOSED :
+		(relayModes[1] == RELAY_PID && Output >= 2 ? RELAY_CLOSED : RELAY_OPEN));
+	digitalWrite(RELAY3, (relayModes[2] == RELAY_ON) ? RELAY_CLOSED :
+		(relayModes[2] == RELAY_PID && Output >= 4 ? RELAY_CLOSED : RELAY_OPEN));
 #endif
   } else {
   	digitalWrite(RELAY1, RELAY_OPEN);

@@ -8,6 +8,7 @@ body {
 	font-family: sans-serif;
 	margin:20px;
 	background-color: #ffcc0099;
+        background-repeat: repeat repeat-x repeat-y;
 	--sat: .2; /* initial saturation factor */
 }
 
@@ -16,6 +17,7 @@ body::before {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
       background: url('wood_vertical_wall.jpg');
+      background-repeat: repeat repeat-x repeat-y;
       filter: saturate(var(--sat));
       z-index: -1; /* stay behind all content */
     }
@@ -182,6 +184,9 @@ td { vertical-align: middle; padding: 6px; }
 .relays-row { display:flex; gap:12px; align-items:center; }
 .relay-label { text-align:center; margin:0; font-size:1.2em; font-weight:bold; }
 .relay-status { text-align:center; margin-top:6px; }
+
+.voltage {font-size: 1.5em; font-weight: bold; }
+p.voltage { margin: 0; }
 
 /* rotation animation for reload arrow (CCW) */
 @keyframes spinccw {

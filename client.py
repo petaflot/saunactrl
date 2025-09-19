@@ -3,7 +3,7 @@ import asyncio
 import websockets
 import sys
 
-ESP_HOST = "10.11.22.33"   # replace with your ESP's IP
+ESP_HOST = "192.168.14.123"   # replace with your ESP's IP
 ESP_PORT = 80
 WS_PATH = "/ws"
 

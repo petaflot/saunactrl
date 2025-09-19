@@ -26,7 +26,7 @@ const halfLifeSize  = 12;   // power/relay knob size half-life
 const halfLifePill  = 6;    // pill indicator shrink half-life (per-relay)
 const halfLifeAlpha  = 15;  // currentTemp opacity half-life
 const halfLifePIDAlpha = 5; // PID opacity half-life
-const halfLifeDoorAlpha = 5; // door status opacity half-life
+const halfLifeDoorAlpha = 100; // door status opacity half-life
 const halfLifeTargetSize = 20; // target font size half-life
 const reloadTimeout = 30;   // seconds before power-toggle switches to reload mode
 
@@ -57,7 +57,6 @@ function updateTimer(){
   cal = document.getElementById("clock-cal")
   clock.textContent = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
   cal.textContent = `${now.getYear()+1900}-${(now.getMonth()+1).toString().padStart(2,'0')}-${now.getDate().toString().padStart(2,'0')}`;
-  //const t = (now - lastUpdate)/1000;
 
   if (timerEnable) {
     var interval = countDownDate - now;
@@ -82,12 +81,10 @@ function updateTimer(){
     }
     document.getElementById("timer-s").innerHTML = ":" + seconds.toString().padStart(2,'0');
   }
-
 }
 
 // compute and apply visuals per tick
 function updateVisuals(){
-  //console.log("updateVisuals()");
   const now = Date.now();
   const t = (now - lastUpdate)/1000;
   const sat = expDecay(sat0, t, halfLifeColor);
@@ -219,15 +216,11 @@ function updateVisuals(){
 }
 
 function setMode(newMode){
-  //console.log('Setting mode, current is:', mode);
   mode=newMode;
   const statusEl=document.getElementById("status");
   const toggleWrap=document.getElementById("powerWrap");
-  //const powerToggle = document.getElementById("powerToggle");
-  toggleWrap.className="switch "+mode;
-  statusEl.textContent=(mode==="on")?"On":(mode==="off")?"Off":"Unknown";
-  //updateVisuals();
-  //console.log('Mode set:', mode);
+  toggleWrap.className="switch "+(mode?"on":"off");
+  statusEl.textContent=(mode)?"On":(mode==="off")?"Off":"Unknown";
 }
 
 function setRelayUI(relay,rmode=undefined,state=undefined){
@@ -254,7 +247,6 @@ function clickRelay(event,relay){
   const y=event.clientY-rect.top;
   const third=rect.height/3;
   const newMode=(y<third)?"on":(y<2*third)?"pid":"off";
-  //setRelayUI(relay,newMode);
   if (ws && ws.readyState===WebSocket.OPEN) ws.send("relay:"+relay+":"+newMode);
 }
 
@@ -263,10 +255,12 @@ function handlePowerToggle(ev){
   const age=(now-lastUpdate)/1000;
   if (age>reloadTimeout){ location.reload(); }
   else {
-    if (ev.target.checked){
-      if (ws && ws.readyState===WebSocket.OPEN) ws.send("enable"); //setMode("on");
+    if (mode == "on"){
+      console.log("enable -> disable", mode);
+      if (ws && ws.readyState===WebSocket.OPEN) ws.send("disable");
     } else {
-      if (ws && ws.readyState===WebSocket.OPEN) ws.send("disable"); //setMode("off");
+      console.log("disable -> enable", mode);
+      if (ws && ws.readyState===WebSocket.OPEN) ws.send("enable");
     }
   }
 }
@@ -289,7 +283,7 @@ function enableTimer(en) {
 
 function setEnabled(data){
   if (data.enabled !== undefined){
-    //console.log("setEnabled()", data);
+    console.log("setEnabled()", data);
     if (data.enabled) {
       setMode("on");
     } else {
@@ -316,24 +310,6 @@ function setPID(data){
 }
 
 function setRelays(data){
-  if (data.relayModes !== undefined){
-    const modeMap=["off","pid","on"];
-    for (let i=0;i<3;i++){
-      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
-      //setRelayUI(i+1,m,st);
-      setRelayUI(i+1,rmode=m);
-    }
-    //console.log('setRelays() relayModes:', data.relayModes);
-  }
-  if (data.relayStates !== undefined){
-    const stateMap=["OFF","ON","ERROR"];
-    for (let i=0;i<3;i++){
-      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
-      setRelayUI(i+1,state=st);
-    }
-    //console.log('setRelays() relayStates:', data.relayStates);
-  }
-  // TODO clean .. why it behaves bad without it?!?
   if (data.relayStates !== undefined && data.relayModes !== undefined){
     const modeMap=["off","pid","on"];
     const stateMap=["OFF","ON","ERROR"];
@@ -341,6 +317,18 @@ function setRelays(data){
       const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
       const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
       setRelayUI(i+1,m,st);
+    }
+  } else if (data.relayModes !== undefined){
+    const modeMap=["off","pid","on"];
+    for (let i=0;i<3;i++){
+      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
+      setRelayUI(i+1,rmode=m);
+    }
+  } else if (data.relayStates !== undefined){
+    const stateMap=["OFF","ON","ERROR"];
+    for (let i=0;i<3;i++){
+      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
+      setRelayUI(i+1,state=st);
     }
   }
 }
@@ -364,9 +352,8 @@ function setDoor(data){
 
 window.onload=function(){
   countDownDate = false;
-  //setMode("modeUnknown");     // TODO clean "modeUnknown" ; this should not not be necessary
 
-  // Fetch the JSON
+  // Fetch the status JSON
   const jsonUrl = window.location.protocol + '//' + window.location.host + '/status.json';
   fetch(jsonUrl)
       .then(response => {
@@ -415,8 +402,6 @@ window.onload=function(){
         const ambiantText=document.getElementById("ambiantTemp");
         if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
       }
-
-      //updateVisuals();
 
     } catch(e){ console.error("Parse error:",e); }
   };
