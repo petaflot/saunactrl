@@ -20,7 +20,6 @@
 #include <LittleFS.h>
 #include <network.h>
 #include <Ticker.h>
-#include "hc_ad_mux.h"
 
 #define RELAY_OPEN HIGH
 #define RELAY_CLOSED LOW
