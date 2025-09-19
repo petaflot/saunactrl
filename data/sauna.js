@@ -218,11 +218,9 @@ function updateVisuals(){
 }
 
 function setMode(newMode){
-  //console.log('Setting mode, current is:', mode, ' -> ', newMode);
   mode=newMode;
   const statusEl=document.getElementById("status");
   const toggleWrap=document.getElementById("powerWrap");
-  //const powerToggle = document.getElementById("powerToggle");
   toggleWrap.className="switch "+(mode?"on":"off");
   statusEl.textContent=(mode)?"On":(mode==="off")?"Off":"Unknown";
   //updateVisuals();
@@ -259,15 +257,10 @@ function clickRelay(event,relay){
 function handlePowerToggle(ev){
   const now=Date.now();
   const age=(now-lastUpdate)/1000;
-  if (age>reloadTimeout){ location.reload(); }
-  else {
-    if (mode == "on"){
-      console.log("enable -> disable", mode);
-      if (ws && ws.readyState===WebSocket.OPEN) ws.send("disable");
-    } else {
-      console.log("disable -> enable", mode);
-      if (ws && ws.readyState===WebSocket.OPEN) ws.send("enable");
-    }
+  if (age>reloadTimeout){
+    location.reload();
+  }  else {
+    if (ws && ws.readyState===WebSocket.OPEN) ws.send(mode=="on"?"disable":"enable");
   }
 }
 
@@ -289,7 +282,7 @@ function enableTimer(en) {
 
 function setEnabled(data){
   if (data.enabled !== undefined){
-    console.log("setEnabled()", data);
+    //console.log("setEnabled()", data);
     if (data.enabled) {
       setMode("on");
     } else {
@@ -316,34 +309,25 @@ function setPID(data){
 }
 
 function setRelays(data){
-  if (data.relayModes !== undefined){
-    //console.log("data.relayModes !== undefined");
-    const modeMap=["off","pid","on"];
-    for (let i=0;i<3;i++){
-      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
-      //setRelayUI(i+1,m,st);
-      setRelayUI(i+1,rmode=m);
-    }
-    //console.log('setRelays() relayModes:', data.relayModes);
-  }
-  if (data.relayStates !== undefined){
-    //console.log("data.relayStates !== undefined");
-    const stateMap=["OFF","ON","ERROR"];
-    for (let i=0;i<3;i++){
-      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
-      setRelayUI(i+1,state=st);
-    }
-    //console.log('setRelays() relayStates:', data.relayStates);
-  }
-  // TODO clean .. why it behaves bad without it?!?
   if (data.relayStates !== undefined && data.relayModes !== undefined){
-    //console.log("data.things...");
     const modeMap=["off","pid","on"];
     const stateMap=["OFF","ON","ERROR"];
     for (let i=0;i<3;i++){
       const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
       const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
       setRelayUI(i+1,m,st);
+    }
+  } else if (data.relayModes !== undefined){
+    const modeMap=["off","pid","on"];
+    for (let i=0;i<3;i++){
+      const m=data.relayModes?(modeMap[data.relayModes[i]]||"modeUnknown"):"modeUnknown";
+      setRelayUI(i+1,rmode=m);
+    }
+  } else if (data.relayStates !== undefined){
+    const stateMap=["OFF","ON","ERROR"];
+    for (let i=0;i<3;i++){
+      const st=data.relayStates?(stateMap[data.relayStates[i]]||"OFF"):"OFF";
+      setRelayUI(i+1,state=st);
     }
   }
 }
@@ -366,7 +350,6 @@ function setDoor(data){
 
 window.onload=function(){
   countDownDate = false;
-  //setMode("modeUnknown");     // TODO clean "modeUnknown" ; this should not not be necessary
 
   // Fetch the JSON
   const jsonUrl = window.location.protocol + '//' + window.location.host + '/status.json';
@@ -379,16 +362,11 @@ window.onload=function(){
       })
       .then(data => {
           lastUpdate=Date.now();
-          //console.log('Fetched JSON data:', data);
           setEnabled(data);
           setTarget(data);
           setPID(data);
       	  setRelays(data);
           setDoor(data);
-
-          //console.log('Processed JSON:', data);
-
-          //updateVisuals();
       })
       .catch(error => {
           console.error('Error fetching status.json:', error);
