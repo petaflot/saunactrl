@@ -4,7 +4,8 @@ import websockets
 import sys
 import time
 
-ESP_HOST = "192.168.14.123"
+#ESP_HOST = "192.168.14.123"
+ESP_HOST = "10.11.21.33"
 ESP_PORT = 80
 WS_PATH = "/ws"
 

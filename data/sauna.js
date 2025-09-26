@@ -362,11 +362,17 @@ window.onload=function(){
       })
       .then(data => {
           lastUpdate=Date.now();
+	  if (data.temp != undefined) lastTempValue=data.temp;
           setEnabled(data);
           setTarget(data);
           setPID(data);
       	  setRelays(data);
           setDoor(data);
+
+          if (data.ambiant !== undefined){
+            const ambiantText=document.getElementById("ambiantTemp");
+            if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
+          }
       })
       .catch(error => {
           console.error('Error fetching status.json:', error);
@@ -380,7 +386,7 @@ window.onload=function(){
       const data=JSON.parse(event.data);
       lastUpdate=Date.now();
       lastTempUpdate=Date.now();
-      lastTempValue=data.temp;
+      if (data.temp != undefined) lastTempValue=data.temp;
 
       setEnabled(data);
       setTarget(data);
