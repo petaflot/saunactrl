@@ -19,8 +19,6 @@
 #include <PID_v1.h>
 #include <LittleFS.h>
 #include <network.h>
-#include <hc_ad_mux.h>
-#include <Ticker.h>
 
 #define RELAY_OPEN HIGH
 #define RELAY_CLOSED LOW
@@ -66,91 +64,9 @@ constexpr size_t RELAY_COUNT = 1;
 
 
 #ifdef FEATURES_PSVMRD
+#include <psvmrd.h>
+#endif
 
-// TODO move PS-VM-RD stuff to another file
-
-#define	SCLK		D5	// 74HCT595
-//#define 	SDO		D6
-#define	SDI		D7	// 74HCT595
-#define	LATCH		D8	// 74HCT595
-#define AOUTA		A0
-
-
-// ADC calibration
-const float ADC_VOLTAGE_REF = 1.0f;   // V (ESP8266 ADC range)
-const int ADC_MAX = 1023;             // analogRead max (0..1023)
-const float calibrationMultiplier = 875.0f; // approx, may need refining and per-device (and per-channel!) tuning
-
-// Setup MUX1 (bits 0–2) and MUX2 (bits 3–5)
-HC4051 mux1(0, LATCH, SCLK, SDI);
-HC4051 mux2(1, LATCH, SCLK, SDI);
-// System: MUX2 feeds into MUX1 channel 4
-MUXSystem muxSys(AOUTA, mux1, mux2, 4);
-
-// Sampling config
-/* if sample rate is too high, WiFi starves and watchdog resets device!
- * 250 OK, 500 NOK, 330 OK, 400 starts choking, 350 already chokes
- * then fails at 250.. irregular ping times, I suppose two cores would be better!
- * works so-so, definitely favor two cores there!
- */
-const int SAMPLE_RATE_HZ = 250;
-const int BUFFER_SIZE = 100;
-
-constexpr int NUM_CHANNELS = 7;  // up to 16 channels (8 mux1 + 8 mux2)
-int adcChannels[NUM_CHANNELS] = {0, 1, 2, 3, 8, 9, 10};  // mux channel numbers to read
-
-struct ChannelBuffer {
-  int samples[BUFFER_SIZE];   // big buffer, lives in DRAM
-  volatile uint16_t head;     // index, volatile because ISR writes it
-};
-// One buffer per channel, allocated globally (not on stack)
-ChannelBuffer chanBuf[NUM_CHANNELS];
-
-Ticker sampler;
-int currentChannel = 0;
-
-// ---- Sampling ISR ----
-void sampleADC() {
-  int raw;
-  if (adcChannels[currentChannel] >= 8) {
-    raw = muxSys.readMux2(adcChannels[currentChannel]-8);
-  } else {
-    raw = muxSys.readMux1(adcChannels[currentChannel]);
-  }
-
-  ChannelBuffer &buf = chanBuf[currentChannel];
-  buf.samples[buf.head] = raw;
-  buf.head = (buf.head + 1) % BUFFER_SIZE;
-
-  if (currentChannel == (NUM_CHANNELS-1)){
-    currentChannel = 0;
-  } else {
-    currentChannel++;
-  }
-}
-
-// ---- Compute RMS on demand ----
-float computeRMS(int chan) {
-  noInterrupts();
-  ChannelBuffer &buf = chanBuf[chan];
-  interrupts();
-
-  double sum = 0, sumSq = 0;
-  for (int i = 0; i < BUFFER_SIZE; i++) {
-    int v = buf.samples[i];
-    sum += v;
-    sumSq += (double)v * v;
-  }
-
-  double mean = sum / BUFFER_SIZE;
-  double variance = (sumSq / BUFFER_SIZE) - (mean * mean);
-  if (variance < 0) variance = 0;
-
-  double rmsRaw = sqrt(variance);
-  float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / ADC_MAX);
-  return voltsRMS * calibrationMultiplier;
-}
-#endif // FEATURES_PSVMRD
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -231,6 +147,8 @@ void loadRelayModes() {
   // TODO
 }
 
+// TODO: more precision in floats! (at least 2 decimals, possibly configurable)
+// TODO: return true/false instead of 1.000 or 0.000 when applicable
 class JsonBuilder {
 public:
   JsonBuilder() { clear(); }
@@ -301,17 +219,6 @@ private:
 };
 
 JsonBuilder jb;
-
-#ifdef FEATURES_PSVMRD
-void getVoltages(float *out) {
-    noInterrupts();
-    for (size_t i = 0; i < NUM_CHANNELS; i++) {
-        out[i] = computeRMS(i);
-    }
-    interrupts();
-}
-float volts[NUM_CHANNELS];
-#endif
 
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
@@ -562,7 +469,7 @@ WiFi.begin(ssid, password);
     msg += ",\n\t\"target\":" + String(Setpoint, 2);
     msg += ",\n\t\"ambiant\":" + String(Ambiant, 2);
     msg += ",\n\t\"enabled\":" + String(enabled ? "true" : "false");
-    msg += ",\n\t\"door\":" + String(door_is_open ? "open" : "closed");
+    msg += ",\n\t\"door\":" + String(door_is_open ? "\"open\"" : "\"closed\"");
   
     // relayModes
     msg += ",\n\t\"relayModes\":[";
@@ -701,21 +608,21 @@ void loop() {
 
     // Stage SSRs ; NOTE: this is hardcoded for relative power levels [1,2,1]
     // TODO dynamic based on RELAY_COUNT and a (new) relayWatts list
-    if (Output <= 25.) {
+    if (Output <= .25) {
       // Stage 1: SSR1 PWM only
       relayDutyCycles[0] = 4*Output;
-    } else if (Output <= 75.) {
+    } else if (Output <= .75) {
       // Stage 2: SSR1 full, SSR2 PWM
-      relayDutyCycles[0] = 100.;
+      relayDutyCycles[0] = 1.;
 #ifndef SINGLEPHASE_TESTMODE
-      relayDutyCycles[1] = 2*(Output-25.);
+      relayDutyCycles[1] = 2*(Output-.25);
 #endif
     } else {
       // Stage 3: SSR1 + SSR2 full, SSR3 PWM
-      relayDutyCycles[0] = 100.;
+      relayDutyCycles[0] = 1.;
 #ifndef SINGLEPHASE_TESTMODE
-      relayDutyCycles[1] = 100.;
-      relayDutyCycles[2] = 4*(Output-75.);
+      relayDutyCycles[1] = 1.;
+      relayDutyCycles[2] = 4*(Output-.75);
 #endif
     }
 

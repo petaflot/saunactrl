@@ -348,6 +348,36 @@ function setDoor(data){
   }
 }
 
+function process_json(data)
+{
+  lastUpdate=Date.now();
+  
+  setEnabled(data);
+  setDoor(data);
+  if (data.temp != undefined) {
+    lastTempValue=data.temp;
+    lastTempUpdate=Date.now();
+  }
+  setTarget(data);
+  setPID(data);
+  setRelays(data);
+  
+  if (data.ambiant !== undefined){
+    const ambiantText=document.getElementById("ambiantTemp");
+    if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
+  }
+  
+  if (data.voltages !== undefined){
+    document.getElementById("voltage-inR").textContent = data.voltages[0].toFixed(1)+" [V]";
+    document.getElementById("voltage-inS").textContent = data.voltages[1].toFixed(1)+" [V]";
+    document.getElementById("voltage-inT").textContent = data.voltages[2].toFixed(1)+" [V]";
+    document.getElementById("voltage-inN").textContent = data.voltages[3].toFixed(1)+" [V]";
+    document.getElementById("voltage-out1R").textContent = data.voltages[4].toFixed(1)+" [V]";
+    document.getElementById("voltage-out1S").textContent = data.voltages[5].toFixed(1)+" [V]";
+    document.getElementById("voltage-out1T").textContent = data.voltages[6].toFixed(1)+" [V]";
+  }
+}
+
 window.onload=function(){
   countDownDate = false;
 
@@ -361,54 +391,18 @@ window.onload=function(){
           return response.json();
       })
       .then(data => {
-          lastUpdate=Date.now();
-          setEnabled(data);
-          setDoor(data);
-	  if (data.temp != undefined) lastTempValue=data.temp;
-          setTarget(data);
-          setPID(data);
-      	  setRelays(data);
-
-          if (data.ambiant !== undefined){
-            const ambiantText=document.getElementById("ambiantTemp");
-            if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
-          }
+	  process_json(data);
       })
       .catch(error => {
           console.error('Error fetching status.json:', error);
       });
-
 
   // open socket
   ws=new WebSocket("ws://"+window.location.host+"/ws");
   ws.onmessage=(event)=>{
     try{
       const data=JSON.parse(event.data);
-      lastUpdate=Date.now();
-      lastTempUpdate=Date.now();
-      setEnabled(data);
-      setDoor(data);
-      if (data.temp != undefined) lastTempValue=data.temp;
-      setTarget(data);
-      setPID(data);
-      setRelays(data);
-
-      if (data.ambiant !== undefined){
-        const ambiantText=document.getElementById("ambiantTemp");
-        if (ambiantText) ambiantText.textContent="Ambiant: "+(data.ambiant !== -127.0?data.ambiant.toFixed(1):"--")+"°C";
-      }
-
-      //updateVisuals();
-
-      if (data.voltages !== undefined){
-        document.getElementById("voltage-inR").textContent = data.voltages[0].toFixed(1)+" [V]";
-        document.getElementById("voltage-inS").textContent = data.voltages[1].toFixed(1)+" [V]";
-        document.getElementById("voltage-inT").textContent = data.voltages[2].toFixed(1)+" [V]";
-        document.getElementById("voltage-inN").textContent = data.voltages[3].toFixed(1)+" [V]";
-        document.getElementById("voltage-out1R").textContent = data.voltages[4].toFixed(1)+" [V]";
-        document.getElementById("voltage-out1S").textContent = data.voltages[5].toFixed(1)+" [V]";
-        document.getElementById("voltage-out1T").textContent = data.voltages[6].toFixed(1)+" [V]";
-      }
+      process_json(data);
 
     } catch(e){ console.error("Parse error:",e); }
   };

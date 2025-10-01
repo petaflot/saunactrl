@@ -70,7 +70,7 @@ A0    AOUTA       12 // for PS-VM-RD
 
 ## Compile, upload and monitor
 
-Copy `src/network.h.example` and save your changes in `src/network.h`. Check confirugation options in `src/main.cpp`. Then:
+Copy `src/network.h.example` and save your changes in `src/network.h`. Check configuration options in `src/main.cpp`. Then:
 
 ```sh
 pio run --target uploadfs
