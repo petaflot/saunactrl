@@ -39,13 +39,6 @@
 //#define SMOOTH_TRIAC
 
 
-// TODO normalize between 0 and 1
-#ifdef STAGED_SSRs
-#define PIDRANGE 100
-#else
-#define PIDRANGE 4 // TODO RELAY_COUNT ponderated with relayWatts
-#endif
-
 #define TEMP_ABSMAX 125 // target temperature may NEVER be set above this point
 #define TEMP_ERROR -127.0
 
@@ -340,6 +333,7 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocket
     } else if (msg == "disable") {
       enabled = false;
       jb.addValue("enabled", false);
+      jb.addValue("pid", 0); // kinda dirty hack for code simplicity
       ws.textAll(jb.finish());
 
     } else if (msg.startsWith("target:")) {
@@ -521,7 +515,7 @@ WiFi.begin(ssid, password);
 #endif
 
   myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(0, PIDRANGE); // 3 relays, but non-uniform power outputs
+  myPID.SetOutputLimits(0, 1); // 3 relays, but non-uniform power outputs
 
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
   /*
@@ -563,25 +557,49 @@ WiFi.begin(ssid, password);
   });
   
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request){
-    // TODO build response dynamically as per RELAY_COUNT (see ChatGPT "sauanctrl" or notifyDynamic.cpp) ; add relayDutyCycles
-    // TODO FEATURES_PSVMRD
-    char msg[256];
-    snprintf(msg, sizeof(msg),"{\n\
-	\"ambiant\":%.2f,\n\
-	\"temp\":%.2f,\n\
-	\"target\":%.2f,\n\
-	\"pid\":%.2f,\n\
-	\"enabled\":%s,\n\
-	\"door\":\"%s\",\n\
-	\"relayModes\":[%d,%d,%d],\n\
-	\"relayStates\":[%d,%d,%d],\n\
-  \"voltages\":[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f]\n\
-}",
-	Ambiant, Input, Setpoint, Output,
-  enabled ? "true" : "false", door_is_open ? "open" : "closed",
-	relayModes[0], relayModes[1], relayModes[2],
-	relayStates[0], relayStates[1], relayStates[2],
-  computeRMS(0), computeRMS(1), computeRMS(2), computeRMS(3), computeRMS(4), computeRMS(5), computeRMS(6) );
+    String msg = "{";
+    msg += "\n\t\"temp\":" + String(Input, 2);
+    msg += ",\n\t\"target\":" + String(Setpoint, 2);
+    msg += ",\n\t\"ambiant\":" + String(Ambiant, 2);
+    msg += ",\n\t\"enabled\":" + String(enabled ? "true" : "false");
+    msg += ",\n\t\"door\":" + String(door_is_open ? "open" : "closed");
+  
+    // relayModes
+    msg += ",\n\t\"relayModes\":[";
+    for (size_t i = 0; i < RELAY_COUNT; i++) {
+      msg += String((int)relayModes[i]);
+      if (i < RELAY_COUNT - 1) msg += ",";
+    }
+    msg += "]";
+  
+#ifdef ELECTROMECHANICAL
+    // relayStates
+    msg += ",\n\t\"relayStates\":[";
+    for (size_t i = 0; i < RELAY_COUNT; i++) {
+      msg += relayStates[i] ? "1" : "0";
+      if (i < RELAY_COUNT - 1) msg += ",";
+    }
+    msg += "]";
+#else
+    msg += ",\n\t\"relayDutyCycles\":[";
+    for (size_t i = 0; i < RELAY_COUNT; i++) {
+      msg += String(relayDutyCycles[i], 3);
+      if (i < RELAY_COUNT - 1) msg += ",";
+    }
+    msg += "]";
+#endif
+  
+#ifdef FEATURES_PSVMRD
+    msg += ",\n\t\"voltages\":[";
+    for (size_t i = 0; i < NUM_CHANNELS; i++) {
+      msg += String(computeRMS(i), 2);
+      if (i < NUM_CHANNELS - 1) msg += ",";
+    }
+    msg += "]";
+#endif
+  
+    msg += "\n}";
+
     request->send(200, "text/plain", msg);
 #ifdef SINGLEPHASE_TESTMODE
     Serial.printf("sent status.json to client: %s\n", msg);
@@ -705,11 +723,11 @@ void loop() {
 #ifndef SINGLEPHASE_TESTMODE
     for (size_t i = 0; i < RELAY_COUNT; i++) {
 	    digitalWrite(relayPins[i], (relayModes[i] == RELAY_ON) ? RELAY_CLOSED :
-		    (relayModes[i] == RELAY_PID && (now - windowStartTime) < relayDutyCycles[i]*windowSize/PIDRANGE ? RELAY_CLOSED : RELAY_OPEN));
+		    (relayModes[i] == RELAY_PID && (now - windowStartTime) < relayDutyCycles[i]*windowSize ? RELAY_CLOSED : RELAY_OPEN));
     }
 #else
 	  digitalWrite(relayPins[SINGLEPHASE_TESTMODE], (relayModes[SINGLEPHASE_TESTMODE] == RELAY_ON) ? RELAY_CLOSED :
-		  (relayModes[SINGLEPHASE_TESTMODE] == RELAY_PID && (now - windowStartTime) < relayDutyCycles[SINGLEPHASE_TESTMODE]*windowSize/PIDRANGE ? RELAY_CLOSED : RELAY_OPEN));
+		  (relayModes[SINGLEPHASE_TESTMODE] == RELAY_PID && (now - windowStartTime) < relayDutyCycles[SINGLEPHASE_TESTMODE]*windowSize ? RELAY_CLOSED : RELAY_OPEN));
 #endif
 #endif
 
@@ -726,7 +744,7 @@ void loop() {
   }
 
   if (millis() - lastSend > 5000) {
-    jb.addValue("pid", Output);
+    if (enabled) jb.addValue("pid", Output);
     jb.addValue("temp", Input);
     jb.addValue("ambiant", Ambiant);
 #ifdef STAGED_SSRs
