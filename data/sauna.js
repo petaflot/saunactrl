@@ -362,12 +362,12 @@ window.onload=function(){
       })
       .then(data => {
           lastUpdate=Date.now();
-	  if (data.temp != undefined) lastTempValue=data.temp;
           setEnabled(data);
+          setDoor(data);
+	  if (data.temp != undefined) lastTempValue=data.temp;
           setTarget(data);
           setPID(data);
       	  setRelays(data);
-          setDoor(data);
 
           if (data.ambiant !== undefined){
             const ambiantText=document.getElementById("ambiantTemp");
@@ -386,13 +386,12 @@ window.onload=function(){
       const data=JSON.parse(event.data);
       lastUpdate=Date.now();
       lastTempUpdate=Date.now();
-      if (data.temp != undefined) lastTempValue=data.temp;
-
       setEnabled(data);
+      setDoor(data);
+      if (data.temp != undefined) lastTempValue=data.temp;
       setTarget(data);
       setPID(data);
       setRelays(data);
-      setDoor(data);
 
       if (data.ambiant !== undefined){
         const ambiantText=document.getElementById("ambiantTemp");
@@ -411,12 +410,6 @@ window.onload=function(){
         document.getElementById("voltage-out1T").textContent = data.voltages[6].toFixed(1)+" [V]";
       }
 
-      if (data.enabled) {
-          setMode("on");
-	} else {
-	  setMode("off");
-	  enableTimer(false);
-	}
     } catch(e){ console.error("Parse error:",e); }
   };
 

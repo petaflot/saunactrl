@@ -28,16 +28,27 @@
 // this will enable serial debugging output ; number is index of prefered relay in relayPins (MUST NOT be on RX or TX)
 //#define SINGLEPHASE_TESTMODE 0
 
+// do we have a PS-VM-RD unit attached?
+#define FEATURES_PSVMRD
+
+// are we using slow electromechanical relays?
+//#define ELECTROMECHANICAL
 // should we use some time-window-based PWM (NOT for electromechanical relays!)
 #define STAGED_SSRs
+// do we have fast (cycle-precision with zero-passing detection) TRIAC phase control? TODO
+//#define SMOOTH_TRIAC
+
+
+// TODO normalize between 0 and 1
 #ifdef STAGED_SSRs
 #define PIDRANGE 100
 #else
 #define PIDRANGE 4 // TODO RELAY_COUNT ponderated with relayWatts
 #endif
 
-#define TEMP_ABSMAX 125
+#define TEMP_ABSMAX 125 // target temperature may NEVER be set above this point
 #define TEMP_ERROR -127.0
+
 const int EEPROM_SIZE = 32;
 const int ADDR_SETPOINT = 0;
 const int ADDR_RELAYMODES = 1;
@@ -53,20 +64,25 @@ constexpr size_t RELAY_COUNT = 1;
 //#define RAON		D2
 #define RELAY1 		D3
 #define	DOOR_SW		D4	// NOTE: when on D4, door MUST be open for flashing!!
+
+#ifndef SINGLEPHASE_TESTMODE
+// on TX/RX
+#define RELAY2 		1
+#define RELAY3 		3
+#endif
+
+
+#ifdef FEATURES_PSVMRD
+
+// TODO move PS-VM-RD stuff to another file
+
 #define	SCLK		D5	// 74HCT595
 //#define 	SDO		D6
 #define	SDI		D7	// 74HCT595
 #define	LATCH		D8	// 74HCT595
 #define AOUTA		A0
 
-#ifndef SINGLEPHASE_TESTMODE
-  // on TX/RX
-  #define RELAY2 		1
-  #define RELAY3 		3
-#endif
 
-
-// PS-MV-RD starts
 // ADC calibration
 const float ADC_VOLTAGE_REF = 1.0f;   // V (ESP8266 ADC range)
 const int ADC_MAX = 1023;             // analogRead max (0..1023)
@@ -141,7 +157,7 @@ float computeRMS(int chan) {
   float voltsRMS = rmsRaw * (ADC_VOLTAGE_REF / ADC_MAX);
   return voltsRMS * calibrationMultiplier;
 }
-// PS-MV-RD ends
+#endif // FEATURES_PSVMRD
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -179,10 +195,26 @@ const int relayPins[RELAY_COUNT] = { RELAY1 };
 enum RelayModes { RELAY_OFF, RELAY_PID, RELAY_ON };
 RelayModes relayModes[RELAY_COUNT] = {};
 enum RelayStates { RELAY_IS_OFF, RELAY_IS_ON, SOMETHING_IS_BROKEN };
-RelayStates relayStates[RELAY_COUNT] = {};
+RelayStates relayStates[RELAY_COUNT] = {};  // TODO only use ifdef ELECTROMECHANICAL
 RelayStates lastRelayStates[RELAY_COUNT] = {};
 #ifdef STAGED_SSRs
 unsigned long relayDutyCycles[RELAY_COUNT] = {};
+#endif
+
+#ifdef ELECTROMECHANICAL
+  #ifdef STAGED_SSRs
+    "only one of ELECTROMECHANICAL, STAGED_SSRs or SMOOTH_TRIAC may be enabled"
+  #else
+    #ifdef SMOOTH_TRIAC
+      "only one of ELECTROMECHANICAL, STAGED_SSRs or SMOOTH_TRIAC may be enabled"
+    #endif
+  #endif
+#else
+  #ifdef STAGED_SSRs
+    #ifdef SMOOTH_TRIAC
+      "only one of ELECTROMECHANICAL, STAGED_SSRs or SMOOTH_TRIAC may be enabled"
+    #endif
+  #endif
 #endif
 
 /*
@@ -277,6 +309,7 @@ private:
 
 JsonBuilder jb;
 
+#ifdef FEATURES_PSVMRD
 void getVoltages(float *out) {
     noInterrupts();
     for (size_t i = 0; i < NUM_CHANNELS; i++) {
@@ -285,6 +318,7 @@ void getVoltages(float *out) {
     interrupts();
 }
 float volts[NUM_CHANNELS];
+#endif
 
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
@@ -349,10 +383,12 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocket
 #endif
       client->text(jb.finish());
 
+#ifdef FEATURES_PSVMRD
     } else if (msg == "voltages") {
       getVoltages(volts);
       jb.addValue("voltages", volts);
       client->text(jb.finish());
+#endif
     }
     jb.clear();
   }
@@ -384,6 +420,7 @@ void setup() {
   pinMode(relayPins[SINGLEPHASE_TESTMODE], OUTPUT);
   digitalWrite(relayPins[SINGLEPHASE_TESTMODE], RELAY_OPEN);
 #else
+  std::fill_n(relayStates, RELAY_COUNT, RELAY_IS_OFF);
   for (size_t i = 0; i < RELAY_COUNT; i++) {
     pinMode(relayPins[i], OUTPUT);
     digitalWrite(relayPins[i], RELAY_OPEN);
@@ -527,6 +564,7 @@ WiFi.begin(ssid, password);
   
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request){
     // TODO build response dynamically as per RELAY_COUNT (see ChatGPT "sauanctrl" or notifyDynamic.cpp) ; add relayDutyCycles
+    // TODO FEATURES_PSVMRD
     char msg[256];
     snprintf(msg, sizeof(msg),"{\n\
 	\"ambiant\":%.2f,\n\
@@ -569,18 +607,19 @@ WiFi.begin(ssid, password);
     if (request->hasParam("relay")) {
       String msg = request->getParam("relay")->value(); // <-- declare msg here
 
-    size_t r = msg.substring(6, 7).toInt() - 1;
-    String mode = msg.substring(8);
+      size_t r = msg.substring(6, 7).toInt() - 1;
+      String mode = msg.substring(8);
 
-    if (r >= 0 && r < RELAY_COUNT) {
-      if (mode == "on") relayModes[r] = RELAY_ON;
-      else if (mode == "off") relayModes[r] = RELAY_OFF;
-      else if (mode == "pid") relayModes[r] = RELAY_PID;
+      if (r >= 0 && r < RELAY_COUNT) {
+        if (mode == "on") relayModes[r] = RELAY_ON;
+        else if (mode == "off") relayModes[r] = RELAY_OFF;
+        else if (mode == "pid") relayModes[r] = RELAY_PID;
 
-      if (request->hasParam("save")) EEPROM.put(ADDR_RELAYMODES, relayModes);
+        if (request->hasParam("save")) EEPROM.put(ADDR_RELAYMODES, relayModes);
 
-      jb.addValue("relayModes", relayModes);
-      ws.textAll(jb.finish());
+        jb.addValue("relayModes", relayModes);
+        ws.textAll(jb.finish());
+      }
     }
     if (request->hasParam("save")) EEPROM.commit();
   });
@@ -588,10 +627,12 @@ WiFi.begin(ssid, password);
   server.begin();
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
-  //Serial.printf("Free heap: %u bytes\n ; free stack: %u bytes", ESP.getFreeHeap(), cont_get_free_stack(&g_cont));
+  Serial.printf("Free heap: %u bytes\n ; free stack: %u bytes", ESP.getFreeHeap(), cont_get_free_stack(&g_cont));
 #endif
-  // PS-VM-RD
+
+#ifdef FEATURES_PSVMRD
   sampler.attach_ms(1000 / SAMPLE_RATE_HZ, sampleADC);
+#endif
 }
 
 void loop() {
@@ -612,16 +653,13 @@ void loop() {
 
   if (enabled && !door_is_open && Input != DEVICE_DISCONNECTED_C) {
     myPID.Compute();
-    jb.addValue("pid", Output);
 #ifdef SINGLEPHASE_TESTMODE
     Serial.printf("Temp: %.2f °C, Target: %.2f °C, PID Output: %.2f\n", Input, Setpoint, Output);
 #endif
 
 #ifndef STAGED_SSRs
-    //Serial.println("#ndef STAGED_SSRs");
     // Apply relay states
     // TODO dynamic based on RELAY_COUNT and a (new) relayWatts list
-
 #ifndef SINGLEPHASE_TESTMODE
     for (size_t i = 0; i < RELAY_COUNT; i++) {
 	    digitalWrite(relayPins[i], (relayModes[i] == RELAY_ON) ? RELAY_CLOSED :
@@ -635,31 +673,31 @@ void loop() {
       memcpy(lastRelayStates, relayStates, sizeof(relayStates));
       jb.addValue("relayStates", relayStates);
     }
+
 #else
     //Serial.println("#def STAGED_SSRs");
     unsigned long now = millis();
     if (now - windowStartTime > windowSize) {
-      windowStartTime += windowSize; // reset window
+      windowStartTime = now; // reset window
     }
 
     // Stage SSRs ; NOTE: this is hardcoded for relative power levels [1,2,1]
-    // TODO scale relayDutyCycles values to sth that does not depend of windowSize
     // TODO dynamic based on RELAY_COUNT and a (new) relayWatts list
     if (Output <= 25.) {
       // Stage 1: SSR1 PWM only
       relayDutyCycles[0] = 4*Output;
     } else if (Output <= 75.) {
       // Stage 2: SSR1 full, SSR2 PWM
-      relayDutyCycles[0] = 100;
+      relayDutyCycles[0] = 100.;
 #ifndef SINGLEPHASE_TESTMODE
-      relayDutyCycles[1] = Output-25.;
+      relayDutyCycles[1] = 2*(Output-25.);
 #endif
     } else {
       // Stage 3: SSR1 + SSR2 full, SSR3 PWM
-      relayDutyCycles[0] = 100;
+      relayDutyCycles[0] = 100.;
 #ifndef SINGLEPHASE_TESTMODE
-      relayDutyCycles[1] = 100;
-      relayDutyCycles[2] = Output-75.;
+      relayDutyCycles[1] = 100.;
+      relayDutyCycles[2] = 4*(Output-75.);
 #endif
     }
 
@@ -675,29 +713,30 @@ void loop() {
 #endif
 #endif
 
+  } else {
 #ifdef SINGLEPHASE_TESTMODE
-  } else if (Input == DEVICE_DISCONNECTED_C) {
-    Serial.println("Sensor disconnected!");
+    if (Input == DEVICE_DISCONNECTED_C) {
+      Serial.println("Sensor disconnected!");
+    }
 #endif
+    Output = 0;
+    for (size_t i = 0; i < RELAY_COUNT; i++) {
+      digitalWrite(relayPins[i], RELAY_OPEN);
+    }
   }
 
-  if (millis() - lastSend > 10000) {
+  if (millis() - lastSend > 5000) {
+    jb.addValue("pid", Output);
     jb.addValue("temp", Input);
     jb.addValue("ambiant", Ambiant);
 #ifdef STAGED_SSRs
     jb.addValue("relayDutyCycles", relayDutyCycles);
-    // PS-VM-RD start
-/*
-#ifdef SINGLEPHASE_TESTMODE
-    for (int ch = 0; ch < 16; ch++) {
-      float val = computeRMS(ch);
-      Serial.printf("Ch%02d: %.2f VAC\n", ch, val);
-    }
 #endif
-*/
+
+#ifdef FEATURES_PSVMRD
     getVoltages(volts);
     jb.addValue("voltages", volts);
-    // PS-VM-RD end
+#endif // FEATURES_PSVMRD
     lastSend = millis();
   }
 
