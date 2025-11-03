@@ -24,7 +24,7 @@
 #define RELAY_CLOSED LOW
 
 // this will enable serial debugging output ; number is index of prefered relay in relayPins (MUST NOT be on RX or TX)
-//#define SINGLEPHASE_TESTMODE 0
+#define SINGLEPHASE_TESTMODE 0
 
 // do we have a PS-VM-RD unit attached?
 #define FEATURES_PSVMRD
@@ -282,7 +282,7 @@ void setup() {
     Serial.println("No second temperature sensor found");
 #endif
     // dangerous, do not run!
-    while (1) delay(10000);
+    //while (1) delay(10000);
 
   } else {
 #ifdef SINGLEPHASE_TESTMODE
@@ -319,35 +319,71 @@ void setup() {
     Serial.println("index.html found in LittleFS");
   }*/
 
-if (!WiFi.config(local_IP, gateway, subnet, dns)) {
+  // Configure STA mode
+  if (!WiFi.config(local_IP, gateway, subnet, dns)) {
 #ifdef SINGLEPHASE_TESTMODE
-  Serial.println("STA failed to configure");
+    Serial.println("STA failed to configure (invalid static IP config)");
 #endif
-}
+  }
+  
+  // Start connection (with or without BSSID)
+#ifdef ssid
 #ifdef bssid
-WiFi.begin(ssid, password, 0, bssid);
+  WiFi.begin(ssid, password, 0, bssid);
 #else
-WiFi.begin(ssid, password);
+  WiFi.begin(ssid, password);
 #endif
-
+  
 #ifdef SINGLEPHASE_TESTMODE
   Serial.print("Connecting to WiFi");
 #endif
-  while (WiFi.status() != WL_CONNECTED) {
+  
+  unsigned long startAttemptTime = millis();
+  const unsigned long connectTimeout = 7'000;  // 10 seconds timeout
+  
+  // Wait for connection or timeout
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < connectTimeout) {
     delay(500);
 #ifdef SINGLEPHASE_TESTMODE
     Serial.print(".");
 #endif
   }
-#ifdef SINGLEPHASE_TESTMODE
-  Serial.println("\nWiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("Device MAC address: ");
-  Serial.println(WiFi.macAddress());
-  Serial.print("Connected to BSSID: ");
-  Serial.println(WiFi.BSSIDstr());
 #endif
+  
+  // If still not connected or BSSID not configured → fallback to AP mode
+  if (WiFi.status() != WL_CONNECTED
+#ifndef ssid
+      || true  // No BSSID configured, force AP mode
+#endif
+  ) {
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.println("\nConnection failed or no BSSID configured, starting in AP mode");
+#endif
+    WiFi.disconnect(true);
+    delay(500);
+  
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(ap_local_IP, ap_gateway, ap_subnet);
+    WiFi.softAP(ap_ssid, ap_passphrase);
+  
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.printf("SSID:          %s\n", ap_ssid);
+    Serial.printf("Passphrase:    %s\n", ap_passphrase);
+    Serial.print( "AP IP address: ");
+    Serial.println(WiFi.softAPIP());
+#endif
+  } else {
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.println("\nWiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Device MAC address: ");
+    Serial.println(WiFi.macAddress());
+    Serial.print("Connected to BSSID: ");
+    Serial.println(WiFi.BSSIDstr());
+#endif
+  }
+
 
   myPID.SetMode(AUTOMATIC);
   myPID.SetOutputLimits(0, 1); // 3 relays, but non-uniform power outputs
@@ -436,8 +472,10 @@ WiFi.begin(ssid, password);
     msg += "\n}";
 
     request->send(200, "text/plain", msg);
-#ifdef SINGLEPHASE_TESTMODE
+#ifndef SINGLEPHASE_TESTMODE
+#ifdef FEATURES_PSVMRD
     Serial.printf("sent status.json to client: %s\n", msg);
+#endif
 #endif
   });
 
@@ -480,7 +518,7 @@ WiFi.begin(ssid, password);
   server.begin();
 #ifdef SINGLEPHASE_TESTMODE
   Serial.println("HTTP server started");
-  Serial.printf("Free heap: %u bytes\n ; free stack: %u bytes", ESP.getFreeHeap(), cont_get_free_stack(&g_cont));
+  //Serial.printf("Free heap: %u bytes\n ; free stack: %u bytes", ESP.getFreeHeap(), cont_get_free_stack(&g_cont)); TODO g_cont not defined!
 #endif
 
 #ifdef FEATURES_PSVMRD

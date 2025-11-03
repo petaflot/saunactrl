@@ -5,3 +5,10 @@ IPAddress local_IP(192, 168, 1, 99);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(192, 168, 1, 1);
+
+// fallback if ssid is not defined or connection fails after connectTimeout (default: 7s)
+const char *ap_ssid = "FiniteStateMachine";
+const char *ap_passphrase = "fsm_1234";
+IPAddress ap_local_IP(192,168,4,1);
+IPAddress ap_gateway(192,168,4,1);
+IPAddress ap_subnet(255,255,255,0);

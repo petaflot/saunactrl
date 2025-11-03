@@ -1,6 +1,10 @@
+Generally, a **finite state machine** that runs on ESP microcontrollers.
+
 Control a sauna with ESP8266, PID (1-wire Dallas temperature sensors), web server.
 
-It is easy to program temperature profiles, so *sauna* can also be an oven, a drying rig, refrigeration unit, or any other similar climate-controled device. Focus is on clean and versatile code.
+Interface makes it easy to program temperature profiles (on another host, over
+HTTP), so *sauna* can also be an oven, a drying rig, refrigeration unit, or any
+other similar climate-controled device. Focus is on clean and versatile code.
 
 ![status page](media/webUI.png)
 
@@ -15,17 +19,17 @@ It is easy to program temperature profiles, so *sauna* can also be an oven, a dr
 * staged proportional heating (SSR on slow PWM) or (slower still) staged control of electromechanical relays
 * door switch support and client-side timer (with auto-start)
 * optional [PS-VM-RD](https://electro.nimag.net/PS-VM-RD/) integration (voltage measure)
-
+* ESP starts in AP mode if SSID is not configured, or if connection to configured SSID fails after configured timeout
 
 ## TODO
 
 In no particular order...
 
+* HTTPS on ESP32
 * RGB lighting (connect to WLED host?)
 * ice bath
 * Timing bell and deadman's switch
 * Max power setting for controlled temperature slopes
-* AP mode
 * some sort of authentication mechanism
 * HTML form to set parameters
 * make HTML (and js and css) support configured number of relays
@@ -40,9 +44,14 @@ A few more TODOs reside in the code ; just grep it.
 
 # Safety note
 
-It is advised to use a certified, external protection such as the [Danfoss KP85 (060L125666)](https://store.danfoss.com/us/en_US/Sensing-solutions/Switches/Temperature-switches/KP/Thermostat%2C-KP85/p/060L125666) thermostat: trip point set slightly above the max operating temperature, **NO SELF RESET / MANUAL RESET ONLY**.
+It is advised to use a certified, external protection such as the [Danfoss KP85
+(060L125666)](https://store.danfoss.com/us/en_US/Sensing-solutions/Switches/Temperature-switches/KP/Thermostat%2C-KP85/p/060L125666)
+thermostat: trip point set slightly above the max operating temperature, **NO
+SELF RESET / MANUAL RESET ONLY**.
 
-In any case, the author does not endorse **ANY** responsibility in case of malfunction, fire, injury or whatsoever : **YOU ARE ON YOUR OWN**, and **NEVER LEAVE A POWERED DEVICE UNATTENDED**.
+In any case, the author does not endorse **ANY** responsibility in case of
+malfunction, fire, injury or whatsoever : **YOU ARE ON YOUR OWN**, and **NEVER
+LEAVE A POWERED DEVICE UNATTENDED**.
 
 # Hardware Stuff
 
