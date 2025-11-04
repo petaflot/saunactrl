@@ -19,9 +19,16 @@
 #include <PID_v1.h>
 #include <LittleFS.h>
 #include <network.h>
+#include "hmac.h"
+#include "canon.h"
+#include "json.h"
+#include <ArduinoJson.h>
 
 #define RELAY_OPEN HIGH
 #define RELAY_CLOSED LOW
+
+// for HMAC verification
+const char *secret = "my_secret_seed";
 
 // this will enable serial debugging output ; number is index of prefered relay in relayPins (MUST NOT be on RX or TX)
 #define SINGLEPHASE_TESTMODE 0
@@ -127,6 +134,21 @@ RelayStates lastRelayStates[RELAY_COUNT] = {};
 #include <json.cpp>
 JsonBuilder jb;
 
+
+// Helper to strip "hmac" field from JSON and return the remaining JSON
+bool strip_hmac_field(String &json, String &provided_hmacHex) {
+    int hmacPos = json.indexOf("\"hmac:");
+    if (hmacPos < 0) return false;  // no hmac field found
+
+    // Extract HMAC value
+    provided_hmacHex = json.substring(hmacPos + 6, hmacPos + 70);
+    //Serial.print("provided_hmacHex: ");
+    //Serial.println(provided_hmacHex);
+
+    json.remove(hmacPos-1, 72);
+    return true;
+}
+
 /*
 void saveValueToEEPROM(int save_where, double val) {
   EEPROM.put(save_where, val);
@@ -148,6 +170,42 @@ void loadRelayModes() {
   // TODO
 }
 
+void process_validated_request(AsyncWebServerRequest *request)
+{
+    if (request->hasParam("target")) {
+      String val = request->getParam("target")->value();
+      double newTarget = val.toFloat();
+      if (newTarget > 0 && newTarget < TEMP_ABSMAX) {
+        Setpoint = newTarget;
+	      jb.addValue( "target", Setpoint);
+        ws.textAll(jb.finish());
+        request->send(200, "text/plain", "Target set to " + String(Setpoint,1));
+        Serial.println("New Setpoint: " + String(Setpoint));
+      } else {
+        request->send(400, "text/plain", "Invalid value");
+      }
+      if (request->hasParam("save")) EEPROM.put(ADDR_SETPOINT, Setpoint);
+    }
+    if (request->hasParam("relay")) {
+      String msg = request->getParam("relay")->value(); // <-- declare msg here
+
+      size_t r = msg.substring(6, 7).toInt() - 1;
+      String mode = msg.substring(8);
+
+      if (r >= 0 && r < RELAY_COUNT) {
+        if (mode == "on") relayModes[r] = RELAY_ON;
+        else if (mode == "off") relayModes[r] = RELAY_OFF;
+        else if (mode == "pid") relayModes[r] = RELAY_PID;
+
+        if (request->hasParam("save")) EEPROM.put(ADDR_RELAYMODES, relayModes);
+
+        jb.addValue("relayModes", relayModes);
+        ws.textAll(jb.finish());
+      }
+    }
+    if (request->hasParam("save")) EEPROM.commit();
+}
+
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
@@ -158,6 +216,49 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocket
     }
 #ifdef SINGLEPHASE_TESTMODE
     Serial.println("Received WebSocket message: " + msg);
+
+    // Step 1 & 2: Extract HMAC and remove it
+    String provided_hmacHex;
+    if (!strip_hmac_field(msg, provided_hmacHex)) { return; }
+
+    //Serial.println("Extracted HMAC: " + provided_hmacHex);
+    //Serial.println("JSON without HMAC: " + msg);
+
+    // Step 3: Canonicalize and recompute new HMAC
+    /*
+    KV kvs[MAX_KV];
+    String dummy;
+    size_t n = parseJsonToKVs(msg, kvs, MAX_KV, dummy);
+    sortKVs(kvs, n);
+    String canonical = buildCanonical(kvs, n);
+    */
+
+    String recomputed_hmac = compute_hmac_hex(secret, msg);
+    //Serial.println("Recomputed HMAC: " + recomputed_hmac);
+
+    // Step 4: Compare
+    if (!hex_equals_ci(provided_hmacHex, recomputed_hmac)) {
+      Serial.println("❌ HMAC verification FAILED");
+    } else {
+      //Serial.println("✅ HMAC verified successfully");
+      return;
+    }
+
+    StaticJsonDocument<256> doc;
+    if (deserializeJson(doc, msg)) {
+        Serial.println("❌ JSON parse error");
+        return;
+    }
+
+    MockRequest request;
+    request.client = client;
+    for (JsonPair kv : doc.as<JsonObject>()) {
+        request.params.push_back({ kv.key().c_str(), kv.value().as<String>() });
+    }
+
+    // Call existing parser for WS message
+    process_validated_request(reinterpret_cast<AsyncWebServerRequest*>(&request));
+
 #endif
     // broadcast value changes
     if (msg == "enable") {
@@ -237,6 +338,8 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
 }
 
 void setup() {
+
+
   EEPROM.begin(EEPROM_SIZE);
 
   pinMode(DOOR_SW, INPUT_PULLUP);
@@ -261,6 +364,39 @@ void setup() {
   loadSetpoint();
   loadRelayModes();
 
+  /*
+  Serial.println("HMAC verification demo");
+
+  // Received JSON string (includes HMAC)
+  String incoming = "{\"target\":75,\"enabled\":true,\"hmac\":\"b1af1bf40a497e3724dbbcf2481ab91ff1ae485d904fc3713cf284db4bd8c4c7\"}";
+
+  // Step 1 & 2: Extract HMAC and remove it
+  String received_hmac;
+  String json_no_hmac = strip_hmac_field(incoming, received_hmac);
+
+  Serial.println("Received JSON: " + incoming);
+  Serial.println("JSON without HMAC: " + json_no_hmac);
+
+  // Step 3: Canonicalize and recompute new HMAC
+  KV kvs[MAX_KV];
+  String dummy;
+  size_t n = parseJsonToKVs(json_no_hmac, kvs, MAX_KV, dummy);
+  sortKVs(kvs, n);
+  String canonical = buildCanonical(kvs, n);
+
+  String recomputed_hmac = compute_hmac_hex(secret, canonical);
+
+  Serial.println("Canonical: " + canonical);
+  Serial.println("Extracted HMAC:  " + received_hmac);
+  Serial.println("Recomputed HMAC: " + recomputed_hmac);
+
+  // Step 4: Compare
+  if (hex_equals_ci(received_hmac, recomputed_hmac)) {
+    Serial.println("✅ HMAC verified successfully");
+  } else {
+    Serial.println("❌ HMAC verification FAILED");
+  }
+*/
 
   sensors.begin();
   if (!sensors.getAddress(sensor0, 0)) {
@@ -281,7 +417,7 @@ void setup() {
 #ifdef SINGLEPHASE_TESTMODE
     Serial.println("No second temperature sensor found");
 #endif
-    // dangerous, do not run!
+    // TODO dangerous, do not run!
     //while (1) delay(10000);
 
   } else {
@@ -472,47 +608,40 @@ void setup() {
     msg += "\n}";
 
     request->send(200, "text/plain", msg);
-#ifndef SINGLEPHASE_TESTMODE
-#ifdef FEATURES_PSVMRD
-    Serial.printf("sent status.json to client: %s\n", msg);
-#endif
+#ifdef SINGLEPHASE_TESTMODE
+    Serial.printf("sent status.json to client: %s\n", msg.c_str());
 #endif
   });
 
   // simple GET handler: /set?temp=75
   server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (request->hasParam("target")) {
-      String val = request->getParam("target")->value();
-      double newTarget = val.toFloat();
-      if (newTarget > 0 && newTarget < TEMP_ABSMAX) {
-        Setpoint = newTarget;
-	      jb.addValue( "target", Setpoint);
-        ws.textAll(jb.finish());
-        request->send(200, "text/plain", "Target set to " + String(Setpoint,1));
-        Serial.println("New Setpoint: " + String(Setpoint));
+    // TODO use hmac validation if required!!! current state is worse than a backdoor XD
+/*
+    // HMAC start
+    std::vector<std::pair<String,String>> kvs;
+    String hmacHex;
+
+    for (size_t i=0; i<request->params(); i++) {
+      const AsyncWebParameter* p = request->getParam(i);
+      if (p->name() == "hmac") {
+        hmacHex = p->value();
       } else {
-        request->send(400, "text/plain", "Invalid value");
-      }
-      if (request->hasParam("save")) EEPROM.put(ADDR_SETPOINT, Setpoint);
-    }
-    if (request->hasParam("relay")) {
-      String msg = request->getParam("relay")->value(); // <-- declare msg here
-
-      size_t r = msg.substring(6, 7).toInt() - 1;
-      String mode = msg.substring(8);
-
-      if (r >= 0 && r < RELAY_COUNT) {
-        if (mode == "on") relayModes[r] = RELAY_ON;
-        else if (mode == "off") relayModes[r] = RELAY_OFF;
-        else if (mode == "pid") relayModes[r] = RELAY_PID;
-
-        if (request->hasParam("save")) EEPROM.put(ADDR_RELAYMODES, relayModes);
-
-        jb.addValue("relayModes", relayModes);
-        ws.textAll(jb.finish());
+        kvs.push_back({ p->name(), p->value() });
       }
     }
-    if (request->hasParam("save")) EEPROM.commit();
+    Serial.println(hmacHex);
+    //Serial.println(kvs);
+    if (verifyJsonHMAC(kvs, hmacHex, secret)) {
+      request->send(200, "text/plain", "OK - HMAC valid");
+    } else {
+      request->send(403, "text/plain", "Invalid HMAC");
+      return;
+    }
+    */
+    // HMAC end
+
+    // do whatever is required (HTTP_GET)
+    process_validated_request(request);
   });
 
   server.begin();
@@ -607,7 +736,7 @@ void loop() {
   } else {
 #ifdef SINGLEPHASE_TESTMODE
     if (Input == DEVICE_DISCONNECTED_C) {
-      Serial.println("Sensor disconnected!");
+      //Serial.println("Sensor disconnected!"); TODO remove
     }
 #endif
     Output = 0;

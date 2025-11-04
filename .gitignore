@@ -1,4 +1,4 @@
-.*.swp
+.*.sw?
 .pio/
 src/network.h
 electronics/ESP32/ESP32-backups/

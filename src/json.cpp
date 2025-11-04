@@ -71,3 +71,52 @@ private:
   bool first;
 };
 
+
+
+/*
+ * Allows the use of a json string as it it were a set of POST/GET parameters
+ */
+#include <ArduinoJson.h>
+#include <ESPAsyncWebServer.h>
+
+class MockParam : public AsyncWebParameter {
+public:
+    MockParam(const String &name, const String &value)
+        : AsyncWebParameter(name, value) {}
+};
+
+class MockRequest {
+public:
+    AsyncWebSocketClient *client = nullptr;
+    struct Param {
+        String name;
+        String value;
+    };
+    std::vector<Param> params;
+
+    bool hasParam(const String &name) const {
+	Serial.println("hasParam() ?");
+        for (auto &p : params)
+	{
+	    Serial.printf("hasParam(): %s\n",p.name);
+            if (p.name == name) return true;
+	}
+        return false;
+    }
+
+    MockParam* getParam(const String &name) const {
+        for (auto &p : params)
+            if (p.name == name)
+                return new MockParam(p.name, p.value);
+        return nullptr;
+    }
+
+    void send(int code, const String &type, const String &content) {
+      // TODO: there are some things we may want to broadcast...
+      if (client) {
+          client->text(content);
+      } else {
+          Serial.printf("[MockRequest] send(%d): %s\n", code, content.c_str());
+      }
+    }
+};
